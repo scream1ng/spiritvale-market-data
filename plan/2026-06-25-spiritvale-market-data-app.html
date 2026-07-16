@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SpiritVale Player Market Data App</title>
+<style>
+:root {
+  --green: #22c55e; --red: #ef4444; --yellow: #f59e0b; --blue: #60a5fa;
+  --purple: #a78bfa; --orange: #fb923c;
+  --bg: #0f172a; --surface: #1e293b; --surface2: #0f172a;
+  --border: #334155; --text: #e2e8f0; --muted: #94a3b8;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--text); max-width:1100px; margin:0 auto; padding:2rem; line-height:1.6; }
+a { color:var(--blue); }
+.plan-header { border-left:4px solid var(--blue); padding:1rem 1.5rem; background:var(--surface); border-radius:0 8px 8px 0; margin-bottom:2.5rem; }
+.plan-header h1 { font-size:1.5rem; margin-bottom:0.75rem; }
+.meta { display:flex; flex-wrap:wrap; gap:1.25rem; color:var(--muted); font-size:0.85rem; }
+.badge { display:inline-block; padding:0.2rem 0.65rem; border-radius:999px; font-size:0.75rem; font-weight:600; }
+.badge-low { background:#14532d; color:#86efac; }
+.badge-med { background:#78350f; color:#fcd34d; }
+.badge-high { background:#7f1d1d; color:#fca5a5; }
+.badge-planned { background:#1e3a5f; color:#93c5fd; }
+.badge-done { background:#14532d; color:#86efac; }
+section { margin:2.5rem 0; }
+h2 { font-size:0.8rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); border-bottom:1px solid var(--border); padding-bottom:0.6rem; margin-bottom:1.5rem; }
+.flowchart { display:flex; flex-direction:column; align-items:center; gap:0; }
+.flow-layer { width:100%; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:1rem 1.25rem; position:relative; }
+.flow-layer-label { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.1em; color:var(--muted); margin-bottom:0.75rem; font-weight:600; }
+.flow-boxes { display:flex; flex-wrap:wrap; gap:0.6rem; align-items:center; }
+.flow-box { display:inline-flex; flex-direction:column; align-items:center; justify-content:center; padding:0.45rem 0.85rem; border-radius:6px; font-size:0.8rem; font-weight:600; min-width:5rem; text-align:center; border:2px solid transparent; }
+.flow-box.added    { background:rgba(34,197,94,0.15);  border-color:var(--green);  color:var(--green); }
+.flow-box.removed  { background:rgba(239,68,68,0.1);   border-color:var(--red);    color:var(--red);   opacity:0.6; text-decoration:line-through; }
+.flow-box.changed  { background:rgba(245,158,11,0.12); border-color:var(--yellow); color:var(--yellow); }
+.flow-box.unchanged{ background:var(--surface2); border-color:var(--border); color:var(--muted); }
+.flow-box.trigger  { background:rgba(96,165,250,0.15); border-color:var(--blue);   color:var(--blue); }
+.flow-box sub { font-size:0.65rem; font-weight:400; opacity:0.8; margin-top:0.15rem; }
+.flow-connector { display:flex; align-items:center; justify-content:center; gap:0.75rem; width:100%; padding:0.4rem 0; }
+.flow-connector-line { flex:1; height:1px; background:var(--border); max-width:6rem; }
+.flow-connector-label { font-size:0.72rem; color:var(--muted); white-space:nowrap; }
+.flow-connector-arrow { color:var(--blue); font-size:1.1rem; line-height:1; }
+.flow-legend { display:flex; gap:1.25rem; margin-top:1rem; font-size:0.75rem; color:var(--muted); flex-wrap:wrap; }
+.flow-legend-item { display:flex; align-items:center; gap:0.4rem; }
+.flow-legend-dot { width:8px; height:8px; border-radius:2px; }
+.ba-table { width:100%; border-collapse:collapse; font-size:0.84rem; }
+.ba-table th { padding:0.65rem 1rem; text-align:left; font-size:0.72rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted); border-bottom:2px solid var(--border); }
+.ba-table th.col-before { border-bottom-color:var(--red); }
+.ba-table th.col-after  { border-bottom-color:var(--green); }
+.ba-table th.col-benefit{ border-bottom-color:var(--blue); }
+.ba-table th.col-risk   { border-bottom-color:var(--yellow); }
+.ba-table td { padding:0.7rem 1rem; vertical-align:top; border-bottom:1px solid var(--border); line-height:1.5; }
+.ba-table tr:last-child td { border-bottom:none; }
+.ba-table tr:nth-child(even) td { background:rgba(255,255,255,0.02); }
+.ba-table td.col-before { color:var(--muted); }
+.ba-table td.col-after  { color:var(--green); }
+.ba-table td.col-benefit{ color:var(--blue); }
+.ba-table td.col-risk   { color:var(--yellow); }
+.ba-table td.col-risk .mitigation { font-size:0.76rem; color:var(--muted); margin-top:0.3rem; }
+.ba-table td.col-risk .mitigation::before { content:"↳ "; }
+.steps { display:flex; flex-direction:column; gap:0.75rem; }
+.step { display:flex; gap:1rem; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:1rem; }
+.step-num { width:1.75rem; height:1.75rem; min-width:1.75rem; background:var(--blue); color:#0f172a; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:700; }
+.step-body { flex:1; min-width:0; }
+.step-body h4 { font-size:0.9rem; margin-bottom:0.35rem; }
+.step-desc { font-size:0.82rem; color:var(--muted); margin-bottom:0.6rem; }
+.step-files { display:flex; flex-wrap:wrap; gap:0.3rem; margin-bottom:0.5rem; }
+.file-tag { font-family:monospace; font-size:0.72rem; background:var(--surface2); padding:0.15rem 0.5rem; border-radius:4px; color:var(--blue); }
+.step-meta { display:flex; gap:1rem; font-size:0.75rem; color:var(--muted); }
+.step.done { opacity:0.6; }
+.step.done .step-num { background:var(--green); }
+.checklist { list-style:none; padding:0; display:flex; flex-direction:column; gap:0.4rem; }
+.checklist li { padding:0.55rem 0.75rem; background:var(--surface); border-radius:6px; font-size:0.85rem; display:flex; align-items:flex-start; gap:0.6rem; }
+.checklist li::before { content:"☐"; color:var(--blue); font-size:1rem; line-height:1.2; flex-shrink:0; }
+.checklist li.done::before { content:"☑"; color:var(--green); }
+.rollback { background:var(--surface); border:1px solid var(--border); border-left:3px solid var(--yellow); border-radius:0 8px 8px 0; padding:1rem 1.25rem; font-size:0.85rem; }
+.rollback h4 { font-size:0.8rem; text-transform:uppercase; letter-spacing:0.08em; color:var(--yellow); margin-bottom:0.5rem; }
+.impl-note { background:rgba(96,165,250,0.08); border:1px solid rgba(96,165,250,0.2); border-radius:8px; padding:1rem; font-size:0.82rem; color:var(--muted); margin-bottom:1rem; }
+.impl-note strong { color:var(--blue); }
+.warn-note { background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:1rem; font-size:0.82rem; color:var(--text); margin-bottom:1rem; }
+.warn-note strong { color:var(--yellow); }
+</style>
+</head>
+<body>
+
+<div class="plan-header">
+  <h1>📋 SpiritVale Player Market Data App</h1>
+  <div class="meta">
+    <span>📅 2026-06-25</span>
+    <span>📁 spiritvale-market-data</span>
+    <span>⏱️ Effort: <strong>~2 days (v1)</strong></span>
+    <span>Risk: <span class="badge badge-med">MEDIUM RISK</span></span>
+    <span>Status: <span class="badge badge-planned" id="plan-status">PLANNED</span></span>
+  </div>
+</div>
+
+<section id="s0">
+  <h2>🎯 Goal &amp; Core Finding</h2>
+  <div class="impl-note">
+    <strong>Goal:</strong> a web dashboard of SpiritVale's <em>player market</em> (vending shops) — current listings, prices, price history, filterable by item and by rolled gear substats.
+  </div>
+  <div class="warn-note">
+    <strong>Core finding (Phase 1, done):</strong> The player market is <strong>NOT in the game files</strong>. It lives in the developer's Google Firebase Firestore backend (198 <code>[FirestoreProperty]</code> fields) and is synced to the client at runtime via the Vending system.
+    <br><br>
+    <strong>No legitimate direct DB access.</strong> Reading Baikun's Firestore directly = against ToS / unauthorized. <strong>Workaround = a client capture mod</strong> that logs only the market data the player's own client legitimately receives, uploads to our own DB, dashboard reads our DB. Crowdsourced for coverage.
+    <br><br>
+    Already extracted from files: <strong>726-item static catalog</strong> (<code>data/items.json</code>) + NPC merchant fixed prices (<code>data/merchant_prices.json</code>). This catalog is the reference table live listings join against.
+  </div>
+</section>
+
+<section id="s1">
+  <h2>🗺️ Section 1 — Architecture &amp; Flow</h2>
+  <div class="flowchart">
+
+    <div class="flow-layer">
+      <div class="flow-layer-label">— In-Game (player's client) —</div>
+      <div class="flow-boxes">
+        <div class="flow-box trigger">Player browses vendors<sub>opens market / walks past shops</sub></div>
+        <div class="flow-box unchanged">VendingManager<sub>AllShops, RequestItemList</sub></div>
+        <div class="flow-box unchanged">ClientVendingManager.Load<sub>receives shop list</sub></div>
+      </div>
+    </div>
+
+    <div class="flow-connector">
+      <div class="flow-connector-line"></div>
+      <div class="flow-connector-arrow">↓</div>
+      <div class="flow-connector-label">Harmony hook reads received data (read-only)</div>
+      <div class="flow-connector-line"></div>
+    </div>
+
+    <div class="flow-layer">
+      <div class="flow-layer-label">— Capture Mod (BepInEx IL2CPP) —</div>
+      <div class="flow-boxes">
+        <div class="flow-box added">SpiritValeMarketLogger.dll<sub>Harmony patches</sub></div>
+        <div class="flow-box added">listing serializer<sub>item, substats, price, shop, map, ts</sub></div>
+        <div class="flow-box added">local buffer + dedupe<sub>JSONL on disk</sub></div>
+      </div>
+    </div>
+
+    <div class="flow-connector">
+      <div class="flow-connector-line"></div>
+      <div class="flow-connector-arrow">↓</div>
+      <div class="flow-connector-label">HTTPS POST (batched)</div>
+      <div class="flow-connector-line"></div>
+    </div>
+
+    <div class="flow-layer">
+      <div class="flow-layer-label">— Ingest API + Database —</div>
+      <div class="flow-boxes">
+        <div class="flow-box added">POST /api/ingest<sub>validate + upsert</sub></div>
+        <div class="flow-box added">listings table<sub>current market</sub></div>
+        <div class="flow-box added">trades table<sub>sale history</sub></div>
+        <div class="flow-box added">items table<sub>726-item catalog seed</sub></div>
+      </div>
+    </div>
+
+    <div class="flow-connector">
+      <div class="flow-connector-line"></div>
+      <div class="flow-connector-arrow">↓</div>
+      <div class="flow-connector-label">query (filters, joins)</div>
+      <div class="flow-connector-line"></div>
+    </div>
+
+    <div class="flow-layer">
+      <div class="flow-layer-label">— Web Dashboard (Next.js / Vercel) —</div>
+      <div class="flow-boxes">
+        <div class="flow-box added">Market table<sub>search + filters</sub></div>
+        <div class="flow-box added">Substat filter<sub>crit ≥ X, refine ≥ N, price range</sub></div>
+        <div class="flow-box added">Item price history<sub>from trades</sub></div>
+        <div class="flow-box added">Shop directory<sub>who sells what, where</sub></div>
+      </div>
+    </div>
+
+  </div>
+  <div class="flow-legend">
+    <span class="flow-legend-item"><span class="flow-legend-dot" style="background:var(--blue)"></span> Trigger</span>
+    <span class="flow-legend-item"><span class="flow-legend-dot" style="background:var(--green)"></span> Added</span>
+    <span class="flow-legend-item"><span class="flow-legend-dot" style="background:var(--yellow)"></span> Modified</span>
+    <span class="flow-legend-item"><span class="flow-legend-dot" style="background:var(--red)"></span> Removed</span>
+    <span class="flow-legend-item"><span class="flow-legend-dot" style="background:var(--border)"></span> Unchanged</span>
+  </div>
+</section>
+
+<section id="s2">
+  <h2>⚖️ Section 2 — Before / After / Benefit / Risk</h2>
+  <table class="ba-table">
+    <thead>
+      <tr>
+        <th class="col-before">Before</th>
+        <th class="col-after">After</th>
+        <th class="col-benefit">Benefit</th>
+        <th class="col-risk">Risk &amp; Mitigation</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="col-before">No way to see player market outside the game; must walk to each vendor manually</td>
+        <td class="col-after">Capture mod logs every shop the client receives, into our DB</td>
+        <td class="col-benefit">Market visible on the web, searchable, no in-game grind</td>
+        <td class="col-risk">Modding may breach game ToS
+          <div class="mitigation">Read-only logging of data the client already gets; no memory writes, no backend calls, no automation. Keep mod opt-in &amp; private.</div>
+        </td>
+      </tr>
+      <tr>
+        <td class="col-before">Market data only exists in the dev's Firestore (no access)</td>
+        <td class="col-after">Our own DB, populated from what players legitimately see</td>
+        <td class="col-benefit">We own/control the data; no dependence on dev's backend</td>
+        <td class="col-risk">Coverage is partial — only browsed shops
+          <div class="mitigation">Crowdsource: more players running the mod = fuller coverage. Show "last seen" timestamps so stale data is obvious.</div>
+        </td>
+      </tr>
+      <tr>
+        <td class="col-before">Gear is just a name; can't compare rolls</td>
+        <td class="col-after">Each listing carries rolled substats, refine, potential, cards</td>
+        <td class="col-benefit">Filter "swords, crit ≥ 10%, refine ≥ 5, &lt; 500k" — find good rolls cheap</td>
+        <td class="col-risk">Substat schema (StatData/StatType) may shift across patches
+          <div class="mitigation">Store raw substat JSON alongside parsed fields; re-parse if schema changes.</div>
+        </td>
+      </tr>
+      <tr>
+        <td class="col-before">No price history</td>
+        <td class="col-after">Trade-log entries (VendingLogEntryNew) stored with timestamps</td>
+        <td class="col-benefit">Price trends per item over time</td>
+        <td class="col-risk">Trade log may only expose the player's own sales
+          <div class="mitigation">Confirm at runtime which log the client can read; fall back to snapshotting listing prices over time if global log is unavailable.</div>
+        </td>
+      </tr>
+      <tr>
+        <td class="col-before">N/A</td>
+        <td class="col-after">Mod is rebuilt against each game patch</td>
+        <td class="col-benefit">Stays working long-term</td>
+        <td class="col-risk">Game update breaks IL2CPP offsets / class layout
+          <div class="mitigation">Re-run Il2CppDumper + regenerate interop on each patch; hook by class/method name (Harmony) not raw offsets.</div>
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="s3">
+  <h2>🤖 Section 3 — Implementation Plan (AI)</h2>
+  <div class="impl-note">
+    Run <strong>/implement-plan</strong> to execute these steps. <strong>Step 1 requires the game to be launchable</strong> — start the session with SpiritVale installed and ready to open. Each step is atomic — verify before proceeding.
+  </div>
+  <div class="steps" id="impl-steps">
+
+    <div class="step done" data-step="0" data-files="extract/extract.py,data/items.json,data/merchant_prices.json" data-action="run" data-effort="M">
+      <div class="step-num">0</div>
+      <div class="step-body">
+        <h4>Phase 1 — Static catalog extraction (DONE)</h4>
+        <p class="step-desc">Already complete. Il2CppDumper → DummyDll → UnityPy + TypeTreeGeneratorAPI extracted 726 items + NPC merchant prices to <code>data/</code>. Pipeline reusable per patch.</p>
+        <div class="step-files"><span class="file-tag">data/items.json</span><span class="file-tag">data/merchant_prices.json</span></div>
+        <div class="step-meta"><span>Action: run</span><span>Effort: M</span><span>Status: done</span></div>
+      </div>
+    </div>
+
+    <div class="step" data-step="1" data-files="" data-action="config" data-effort="M">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h4>Install BepInEx (IL2CPP) and confirm SpiritVale launches with it</h4>
+        <p class="step-desc">Install BepInEx 6 (BepInEx-Unity.IL2CPP, win-x64) into the SpiritVale install dir. Launch the game once so BepInEx generates the IL2CPP interop assemblies (interop/ folder). Confirm: game boots to main menu, BepInEx console/log shows interop generated, no crash. GATE: if the game won't start with BepInEx, stop and reassess (try a different loader version) before writing any mod code.</p>
+        <div class="step-meta"><span>Action: config</span><span>Effort: M</span></div>
+      </div>
+    </div>
+
+    <div class="step" data-step="2" data-files="mod/SpiritValeMarketLogger/Plugin.cs,mod/SpiritValeMarketLogger/SpiritValeMarketLogger.csproj" data-action="create" data-effort="M">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h4>Scaffold the BepInEx plugin project</h4>
+        <p class="step-desc">Create a C# class-library targeting the BepInEx IL2CPP plugin API + HarmonyX. Reference the generated interop assemblies and the game's Assembly-CSharp interop. Empty plugin that logs "loaded" on Awake. Build, drop DLL in BepInEx/plugins, confirm the load line appears in the log.</p>
+        <div class="step-files"><span class="file-tag">mod/SpiritValeMarketLogger/Plugin.cs</span><span class="file-tag">…/*.csproj</span></div>
+        <div class="step-meta"><span>Action: create</span><span>Effort: M</span></div>
+      </div>
+    </div>
+
+    <div class="step" data-step="3" data-files="mod/SpiritValeMarketLogger/Hooks.cs" data-action="create" data-effort="L">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h4>Hook the vending data the client receives</h4>
+        <p class="step-desc">Harmony Postfix on <code>ClientVendingManager.Load(List&lt;VendingDataDto&gt;)</code> and on <code>VendingManager.RequestItemList(string)</code>. In the postfix, read each shop's listings: item Id/Type, Count, CountTraded, player-set Price, and for EquipData read Substats (StatData list), Refine, Potential, Cards; plus shop ShopName, owner, MapId/location. Also hook the trade-log path (VendingLogEntryNew) if the client exposes it. Log captured rows to the BepInEx console first to verify real data appears in-game.</p>
+        <div class="step-files"><span class="file-tag">mod/SpiritValeMarketLogger/Hooks.cs</span></div>
+        <div class="step-meta"><span>Action: create</span><span>Effort: L</span></div>
+      </div>
+    </div>
+
+    <div class="step" data-step="4" data-files="mod/SpiritValeMarketLogger/Capture.cs" data-action="create" data-effort="M">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h4>Serialize + buffer captures locally</h4>
+        <p class="step-desc">Map hooked objects to a flat DTO (listing_id, item_id, item_type, substats[], refine, potential, cards[], price, count, count_traded, shop_name, owner_id, map_id, captured_at). Write append-only JSONL to disk under BepInEx/plugins/marketlog/. Dedupe by (listing_id, price, count) so re-browsing doesn't spam. Verify the JSONL fills with real rows after browsing a few shops.</p>
+        <div class="step-files"><span class="file-tag">mod/SpiritValeMarketLogger/Capture.cs</span></div>
+        <div class="step-meta"><span>Action: create</span><span>Effort: M</span></div>
+      </div>
+    </div>
+
+    <div class="step" data-step="5" data-files="web/app/api/ingest/route.ts,web/lib/db.ts,web/schema.sql" data-action="create" data-effort="M">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h4>Backend: ingest API + database schema</h4>
+        <p class="step-desc">Next.js route <code>POST /api/ingest</code> accepting batched listing/trade rows (API key auth). DB (Postgres — Vercel/Supabase): tables <code>items</code> (seed from data/items.json), <code>listings</code> (current market, upsert by listing_id, keep last_seen), <code>trades</code> (append sale history), <code>substats</code> (or JSONB column on listings). Validate payload, upsert listings, insert trades. Seed items table from the 726-item catalog.</p>
+        <div class="step-files"><span class="file-tag">web/app/api/ingest/route.ts</span><span class="file-tag">web/schema.sql</span></div>
+        <div class="step-meta"><span>Action: create</span><span>Effort: M</span></div>
+      </div>
+    </div>
+
+    <div class="step" data-step="6" data-files="mod/SpiritValeMarketLogger/Uploader.cs" data-action="create" data-effort="S">
+      <div class="step-num">6</div>
+      <div class="step-body">
+        <h4>Mod uploads batches to the ingest API</h4>
+        <p class="step-desc">Background task in the mod that flushes buffered JSONL rows to <code>POST /api/ingest</code> over HTTPS every N seconds, with the API key from a local config file. Retry/backoff on failure; keep unsent rows on disk. Verify rows land in the DB.</p>
+        <div class="step-files"><span class="file-tag">mod/SpiritValeMarketLogger/Uploader.cs</span></div>
+        <div class="step-meta"><span>Action: create</span><span>Effort: S</span></div>
+      </div>
+    </div>
+
+    <div class="step" data-step="7" data-files="web/app/page.tsx,web/app/market/page.tsx,web/components/MarketTable.tsx,web/components/Filters.tsx" data-action="create" data-effort="L">
+      <div class="step-num">7</div>
+      <div class="step-body">
+        <h4>Dashboard: market table + filters</h4>
+        <p class="step-desc">Next.js page querying listings joined to items. Searchable table (item name, price, count, shop, location, last seen). Filters: item type, name search, price range, refine ≥ N, and substat filter (pick stat type + min value, matched against the listing's substats JSON). Sort by price/unit price. Show data freshness ("seen 3h ago").</p>
+        <div class="step-files"><span class="file-tag">web/app/market/page.tsx</span><span class="file-tag">web/components/MarketTable.tsx</span></div>
+        <div class="step-meta"><span>Action: create</span><span>Effort: L</span></div>
+      </div>
+    </div>
+
+    <div class="step" data-step="8" data-files="web/app/item/[id]/page.tsx,web/components/PriceHistory.tsx,web/app/shops/page.tsx" data-action="create" data-effort="M">
+      <div class="step-num">8</div>
+      <div class="step-body">
+        <h4>Dashboard: price history + shop directory</h4>
+        <p class="step-desc">Per-item page with price history chart from <code>trades</code> (fallback: listing-price snapshots over time). Shop directory page listing active vendors, their location/map, and what they sell. Link items ↔ shops.</p>
+        <div class="step-files"><span class="file-tag">web/app/item/[id]/page.tsx</span><span class="file-tag">web/app/shops/page.tsx</span></div>
+        <div class="step-meta"><span>Action: create</span><span>Effort: M</span></div>
+      </div>
+    </div>
+
+    <div class="step" data-step="9" data-files="web,vercel.json" data-action="run" data-effort="S">
+      <div class="step-num">9</div>
+      <div class="step-body">
+        <h4>Deploy + end-to-end test</h4>
+        <p class="step-desc">Deploy web app to Vercel, provision the DB, set API key env. Run the mod in-game, browse shops, confirm rows flow client → ingest → DB → dashboard. Verify substat filters return correct gear.</p>
+        <div class="step-files"><span class="file-tag">web/</span></div>
+        <div class="step-meta"><span>Action: run</span><span>Effort: S</span></div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section id="s4">
+  <h2>🧪 Section 4 — Testing Checklist</h2>
+  <ul class="checklist" id="test-checklist">
+    <li class="done">Phase 1: data/items.json has 726 items; merchant_prices.json joins names to prices</li>
+    <li>SpiritVale launches with BepInEx; interop assemblies generated; reaches main menu</li>
+    <li>Empty plugin logs its load line in BepInEx console</li>
+    <li>In-game: open vending market — hook logs real listings (item, price, shop) to console</li>
+    <li>Gear listing logs its substats + refine + potential, not just the name</li>
+    <li>marketlog JSONL fills with deduped rows after browsing several shops</li>
+    <li>POST /api/ingest accepts a batch and upserts into listings/trades</li>
+    <li>Mod uploader flushes buffered rows; DB row count increases</li>
+    <li>Dashboard market table renders listings joined to item names</li>
+    <li>Substat filter (e.g. crit ≥ 10%, refine ≥ 5, &lt; 500k) returns only matching gear</li>
+    <li>Item page shows a price history line; shop directory lists active vendors + locations</li>
+    <li>Stale data shows a "last seen" age</li>
+  </ul>
+</section>
+
+<section id="s5">
+  <h2>🔄 Section 5 — Rollback Plan</h2>
+  <div class="rollback">
+    <h4>⚠️ If something breaks</h4>
+    <p>1. <strong>Game won't start / crashes:</strong> remove the mod DLL from BepInEx/plugins (or remove BepInEx winhttp.dll). Game reverts to vanilla. No game files were modified.</p>
+    <p>2. <strong>Mod logs garbage after a patch:</strong> stop uploading (delete API key config), re-run Il2CppDumper on the new build, regenerate interop, re-fix hooks by name, rebuild.</p>
+    <p>3. <strong>Bad data in DB:</strong> ingest is upsert/append — delete rows by captured_at range or by buildid tag; reseed items from data/items.json.</p>
+    <p>4. <strong>Web app broken:</strong> <code>vercel rollback</code> to previous deployment; dashboard is read-only over the DB so no data loss.</p>
+    <p>5. <strong>Abandon entirely:</strong> remove mod, drop DB. Static catalog in data/ is unaffected and still usable for an items-only site.</p>
+  </div>
+</section>
+
+<section id="s6" style="display:none">
+  <h2>📝 Section 6 — Implementation Log</h2>
+  <div id="impl-log"></div>
+</section>
+
+</body>
+</html>

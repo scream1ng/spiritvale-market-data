@@ -1,0 +1,20 @@
+# Game data extracted locally from your own SpiritVale install.
+# Run extract/extract.py (and the IL2Cpp dump step, see README) to regenerate.
+data/
+extract/dumpout/
+extract/dumpout_demo_backup/
+
+# Third-party tool binaries - download separately, see README
+extract/Il2CppDumper/*.exe
+extract/il2cppdumper.zip
+
+# generated build artifacts
+extract/frida/combined*.js
+
+# logs / scratch output
+*.log
+
+# python
+__pycache__/
+*.pyc
+.venv/
