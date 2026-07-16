@@ -118,6 +118,9 @@ INDEX_HTML = """<!doctype html>
   :root { --bg: #14141a; --card: #1c1c24; --border: #2c2c36; --accent: #3a5fd9; --accent2: #4a6fe9; --text: #e8e8ea; --muted: #8c8c96; --gold: #f0c674; --tag: #262632; --tagtext: #7fd8ff; }
   * { box-sizing: border-box; }
   body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 24px; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; max-width: 1400px; margin: 0 auto 20px; font-weight: 700; }
+  .topbar a { color: var(--gold); text-decoration: none; font-size: 13px; font-weight: 600; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; }
+  .topbar a:hover { background: var(--tag); }
   .cards { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 24px; max-width: 1400px; margin: 0 auto; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; min-width: 0; }
   .card.wide { flex: 2 1 560px; }
@@ -152,6 +155,11 @@ INDEX_HTML = """<!doctype html>
 </style>
 </head>
 <body>
+
+<div class="topbar">
+  <span>SpiritVale Market</span>
+  <a href="https://ko-fi.com/oakkyxd" target="_blank" rel="noopener">&#9749; Support on Ko-fi</a>
+</div>
 
 <div class="cards">
 

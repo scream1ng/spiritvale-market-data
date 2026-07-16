@@ -42,5 +42,4 @@ It only works while you have the game open, and only reflects your own client's 
 
 This is a free hobby project, built and maintained in spare time — no ads, no paywall, no telemetry. If it's useful to you and you'd like to support continued upkeep (redoing the data dump every time the game patches, adding features), donations are welcome but never expected:
 
-- PromptPay QR: *(add your QR code image here)*
-- Ko-fi: *(add your ko-fi.com link here)*
+- Ko-fi: [ko-fi.com/oakkyxd](https://ko-fi.com/oakkyxd)
