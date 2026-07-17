@@ -27,17 +27,15 @@ def check_for_update():
         print(f"Update available: v{VERSION} -> v{remote_version}, downloading...")
         new_path = sys.executable + ".new"
         urllib.request.urlretrieve(asset["browser_download_url"], new_path)
-        pid = os.getpid()
         updater = os.path.join(tempfile.gettempdir(), "svm_update.bat")
         with open(updater, "w") as f:
             f.write(f"""@echo off
 :wait
-tasklist /fi "PID eq {pid}" | find "{pid}" >nul
-if not errorlevel 1 (
+move /y "{new_path}" "{sys.executable}" >nul 2>&1
+if errorlevel 1 (
   timeout /t 1 /nobreak >nul
   goto wait
 )
-move /y "{new_path}" "{sys.executable}" >nul
 start "" "{sys.executable}"
 del "%~f0"
 """)
