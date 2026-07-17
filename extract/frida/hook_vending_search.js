@@ -51,13 +51,14 @@ Il2Cpp.perform(() => {
         return runtime;
     }
 
-    // displayed value = floor(min + (max-min) * raw/100), derived from the game's own
+    // displayed value = round(min + (max-min) * raw/100), derived from the game's own
     // Formula.GetSubstatRange. Formula.GetSubstatScaledValue was previously used for the
     // raw->fraction step, but instrumenting it live showed it only spans ~0.667-1.0 over
     // raw 0-100 (not 0-1), which silently biased every display toward the top of its range
-    // regardless of the actual roll - confirmed via a live Kunai listing with a low raw
-    // CritDamage roll (5/100) still rendering near max. raw/100 is the game's own convention
-    // for substat rolls (see the "value/100" fallback display elsewhere in this project).
+    // regardless of the actual roll. raw/100 is the game's own convention for substat rolls
+    // (see the "value/100" fallback display elsewhere in this project). Confirmed round (not
+    // floor) against a live Stormburst Crossbow listing: Str raw=96, range[2,3], true display 3
+    // - floor(2.96)=2 is wrong, round(2.96)=3 is right.
     function computeDisplayValue(baseItemId, statType, rawValue, isArtifact) {
         const runtime = getSubstatRuntime(baseItemId, isArtifact);
         if (!runtime || runtime.isNull()) return null;
@@ -66,7 +67,7 @@ Il2Cpp.perform(() => {
         const ok = getSubstatRangeMethod.invoke(statType, runtime, minRef, maxRef);
         if (!ok) return null;
         const min = minRef.value, max = maxRef.value;
-        const display = Math.floor(min + (max - min) * (rawValue / 100));
+        const display = Math.round(min + (max - min) * (rawValue / 100));
         return { min, max, display };
     }
 
