@@ -30,7 +30,7 @@ It only works while you have the game open, and only reflects your own client's 
 
 **Run it**
 1. Launch SpiritVale, open the vending search panel at least once.
-2. `cd extract/frida && python server.py`
+2. `cd extract/frida && python server.py` (or build once with `build_exe.bat` and just double-click `SpiritValeMarket.exe` from then on)
 3. Open [http://localhost:5151](http://localhost:5151)
 
 ## Known limitations

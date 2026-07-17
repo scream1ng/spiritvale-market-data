@@ -1,0 +1,34 @@
+name: Build and release exe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "extract/frida/server.py"
+      - "extract/frida/app_icon.ico"
+      - ".github/workflows/release.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install frida flask pyinstaller
+
+      - run: echo "VERSION = ${{ github.run_number }}" > extract/frida/_version.py
+
+      - run: python -m PyInstaller --onefile --name SpiritValeMarket --icon "${{ github.workspace }}\extract\frida\app_icon.ico" --distpath extract/frida --workpath build/pyinstaller --specpath build extract/frida/server.py
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: v${{ github.run_number }}
+          files: extract/frida/SpiritValeMarket.exe

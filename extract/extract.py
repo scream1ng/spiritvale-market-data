@@ -1,6 +1,52 @@
 import UnityPy, os, json, sys, re
 from UnityPy.helpers.TypeTreeGenerator import TypeTreeGenerator
-DATA=os.environ.get("SPIRITVALE_DATA_PATH", r"D:\Steam\steamapps\common\SpiritVale\SpiritVale_Data")
+
+def find_steam_path():
+    try:
+        import winreg
+    except ImportError:
+        return None
+    for hive, key, val in [
+        (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam", "InstallPath"),
+    ]:
+        try:
+            with winreg.OpenKey(hive, key) as k:
+                return winreg.QueryValueEx(k, val)[0]
+        except OSError:
+            continue
+    return None
+
+def find_spiritvale_data():
+    override = os.environ.get("SPIRITVALE_DATA_PATH")
+    if override and os.path.isdir(override):
+        return override
+    steam = find_steam_path()
+    libs = []
+    if steam:
+        libs.append(steam)
+        vdf = os.path.join(steam, "steamapps", "libraryfolders.vdf")
+        if os.path.isfile(vdf):
+            content = open(vdf, encoding="utf-8").read()
+            libs += [p.replace("\\\\", "\\") for p in re.findall(r'"path"\s+"([^"]+)"', content)]
+    for lib in libs:
+        candidate = os.path.join(lib, "steamapps", "common", "SpiritVale", "SpiritVale_Data")
+        if os.path.isdir(candidate):
+            return candidate
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk(); root.withdraw()
+        picked = filedialog.askdirectory(title="SpiritVale not found automatically - select SpiritVale_Data folder")
+        root.destroy()
+        if picked:
+            return picked
+    except Exception:
+        pass
+    sys.exit("Could not locate SpiritVale_Data. Set SPIRITVALE_DATA_PATH env var or select it when prompted.")
+
+DATA=find_spiritvale_data()
 OUT=r"E:\Coding Project\spiritvale-market-data\data"; os.makedirs(OUT,exist_ok=True)
 ICON_DIR=os.path.join(OUT,"icons"); os.makedirs(ICON_DIR,exist_ok=True)
 ITEM_CLASSES=["ItemConfig","ConsumableConfig","GemConfig","CardConfig","JunkConfig","WeaponConfig","EquipConfig"]

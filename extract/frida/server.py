@@ -1,8 +1,53 @@
-import frida, json, time, os, re, threading
+import frida, json, time, os, re, sys, subprocess, tempfile, threading, urllib.request
 from flask import Flask, jsonify, request, send_from_directory
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(HERE, "..", "..", "data")
+try:
+    from _version import VERSION
+except ImportError:
+    VERSION = 0
+
+RELEASES_API = "https://api.github.com/repos/scream1ng/spiritvale-market-data/releases/latest"
+
+def check_for_update():
+    if not getattr(sys, "frozen", False):
+        return
+    try:
+        req = urllib.request.Request(RELEASES_API, headers={"Accept": "application/vnd.github+json"})
+        with urllib.request.urlopen(req, timeout=4) as r:
+            rel = json.load(r)
+        remote_version = int(rel["tag_name"].lstrip("v"))
+        if remote_version <= VERSION:
+            return
+        asset = next((a for a in rel["assets"] if a["name"] == "SpiritValeMarket.exe"), None)
+        if not asset:
+            return
+        print(f"Update available: v{VERSION} -> v{remote_version}, downloading...")
+        new_path = sys.executable + ".new"
+        urllib.request.urlretrieve(asset["browser_download_url"], new_path)
+        pid = os.getpid()
+        updater = os.path.join(tempfile.gettempdir(), "svm_update.bat")
+        with open(updater, "w") as f:
+            f.write(f"""@echo off
+:wait
+tasklist /fi "PID eq {pid}" | find "{pid}" >nul
+if not errorlevel 1 (
+  timeout /t 1 /nobreak >nul
+  goto wait
+)
+move /y "{new_path}" "{sys.executable}" >nul
+start "" "{sys.executable}"
+del "%~f0"
+""")
+        subprocess.Popen(["cmd", "/c", updater], creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP, close_fds=True)
+        print("Restarting to apply update...")
+        os._exit(0)
+    except Exception as e:
+        print(f"Update check failed (continuing): {e}")
+
+check_for_update()
+
+HERE = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(HERE, "data") if os.path.isdir(os.path.join(HERE, "data")) else os.path.join(HERE, "..", "..", "data")
 ICON_DIR = os.path.join(DATA_DIR, "icons")
 STAT_TYPES = json.load(open(os.path.join(DATA_DIR, "stat_types.json"), encoding="utf-8"))
 ITEMS = json.load(open(os.path.join(DATA_DIR, "items.json"), encoding="utf-8"))

@@ -10,6 +10,11 @@ extract/il2cppdumper.zip
 
 # generated build artifacts
 extract/frida/combined*.js
+extract/frida/*.exe
+build/
+*.spec
+SpiritValeMarket/
+extract/frida/_version.py
 
 # logs / scratch output
 *.log
