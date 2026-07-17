@@ -1,0 +1,50 @@
+[
+ {
+  "merchant_path_id": 83297,
+  "entry_name": "Vulkanite Shard_1000",
+  "item_path_id": 83203,
+  "item_id": "Vulkanite Shard",
+  "item_name": "Vulkanite Shard",
+  "price": 1000
+ },
+ {
+  "merchant_path_id": 83297,
+  "entry_name": "Gravion Shard_1000",
+  "item_path_id": 83046,
+  "item_id": "Gravion Shard",
+  "item_name": "Gravion Shard",
+  "price": 1000
+ },
+ {
+  "merchant_path_id": 83297,
+  "entry_name": "Lunaris Shard_1000",
+  "item_path_id": 83080,
+  "item_id": "Lunaris Shard",
+  "item_name": "Lunaris Shard",
+  "price": 1000
+ },
+ {
+  "merchant_path_id": 83297,
+  "entry_name": "Vulkanite Chunk_15000",
+  "item_path_id": 83201,
+  "item_id": "Vulkanite Chunk",
+  "item_name": "Vulkanite Chunk",
+  "price": 15000
+ },
+ {
+  "merchant_path_id": 83297,
+  "entry_name": "Gravion Chunk_15000",
+  "item_path_id": 83044,
+  "item_id": "Gravion Chunk",
+  "item_name": "Gravion Chunk",
+  "price": 15000
+ },
+ {
+  "merchant_path_id": 83297,
+  "entry_name": "Lunaris Chunk_15000",
+  "item_path_id": 83078,
+  "item_id": "Lunaris Chunk",
+  "item_name": "Lunaris Chunk",
+  "price": 15000
+ }
+]

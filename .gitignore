@@ -1,6 +1,6 @@
 # Game data extracted locally from your own SpiritVale install.
-# Run extract/extract.py (and the IL2Cpp dump step, see README) to regenerate.
-data/
+# Committed so CI can bundle it into exe releases - regenerate with extract/extract.py
+# (and the IL2Cpp dump step, see README) after a game update.
 extract/dumpout/
 extract/dumpout_demo_backup/
 
@@ -8,8 +8,10 @@ extract/dumpout_demo_backup/
 extract/Il2CppDumper/*.exe
 extract/il2cppdumper.zip
 
-# generated build artifacts
-extract/frida/combined*.js
+# generated build artifacts (combined_hook.js is committed - CI needs it to build the exe)
+extract/frida/combined.js
+extract/frida/combined_test.js
+extract/frida/combined_tooltip.js
 extract/frida/*.exe
 build/
 *.spec

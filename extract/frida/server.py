@@ -4,7 +4,10 @@ from flask import Flask, jsonify, request, send_from_directory
 try:
     from _version import VERSION
 except ImportError:
-    VERSION = 0
+    VERSION = "0"
+
+def version_tuple(s):
+    return tuple(int(p) for p in s.split("."))
 
 RELEASES_API = "https://api.github.com/repos/scream1ng/spiritvale-market-data/releases/latest"
 
@@ -15,8 +18,8 @@ def check_for_update():
         req = urllib.request.Request(RELEASES_API, headers={"Accept": "application/vnd.github+json"})
         with urllib.request.urlopen(req, timeout=4) as r:
             rel = json.load(r)
-        remote_version = int(rel["tag_name"].lstrip("v"))
-        if remote_version <= VERSION:
+        remote_version = rel["tag_name"].lstrip("v")
+        if version_tuple(remote_version) <= version_tuple(VERSION):
             return
         asset = next((a for a in rel["assets"] if a["name"] == "SpiritValeMarket.exe"), None)
         if not asset:
@@ -47,6 +50,7 @@ del "%~f0"
 check_for_update()
 
 HERE = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
+BUNDLE_DIR = getattr(sys, "_MEIPASS", HERE)
 DATA_DIR = os.path.join(HERE, "data") if os.path.isdir(os.path.join(HERE, "data")) else os.path.join(HERE, "..", "..", "data")
 ICON_DIR = os.path.join(DATA_DIR, "icons")
 STAT_TYPES = json.load(open(os.path.join(DATA_DIR, "stat_types.json"), encoding="utf-8"))
@@ -83,7 +87,7 @@ except frida.ProcessNotFoundError:
         f"Could not find a running process named '{PROCESS_NAME}'. "
         "Start SpiritVale first, or set SPIRITVALE_PID/SPIRITVALE_PROCESS if it's named differently."
     )
-script = session.create_script(open(os.path.join(HERE, "combined_hook.js"), encoding="utf-8").read())
+script = session.create_script(open(os.path.join(BUNDLE_DIR, "combined_hook.js"), encoding="utf-8").read())
 script.on("message", on_message)
 script.load()
 

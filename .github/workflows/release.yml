@@ -6,6 +6,9 @@ on:
     paths:
       - "extract/frida/server.py"
       - "extract/frida/app_icon.ico"
+      - "extract/frida/combined_hook.js"
+      - "extract/frida/VERSION"
+      - "data/**"
       - ".github/workflows/release.yml"
 
 permissions:
@@ -23,12 +26,28 @@ jobs:
 
       - run: pip install frida flask pyinstaller
 
-      - run: echo "VERSION = ${{ github.run_number }}" > extract/frida/_version.py
+      - id: version
+        shell: bash
+        run: |
+          major=$(cat extract/frida/VERSION | tr -d '[:space:]')
+          v="$major.${{ github.run_number }}"
+          echo "VERSION = \"$v\"" > extract/frida/_version.py
+          echo "v=$v" >> "$GITHUB_OUTPUT"
 
-      - run: python -m PyInstaller --onefile --name SpiritValeMarket --icon "${{ github.workspace }}\extract\frida\app_icon.ico" --distpath extract/frida --workpath build/pyinstaller --specpath build extract/frida/server.py
+      - run: python -m PyInstaller --onefile --clean --name SpiritValeMarket --icon "${{ github.workspace }}\extract\frida\app_icon.ico" --add-data "${{ github.workspace }}\extract\frida\combined_hook.js;." --distpath extract/frida --workpath build/pyinstaller --specpath build extract/frida/server.py
+
+      - name: Package full install zip (exe + data)
+        shell: bash
+        run: |
+          mkdir dist_zip
+          cp extract/frida/SpiritValeMarket.exe dist_zip/
+          cp -r data dist_zip/data
+          cd dist_zip && 7z a -tzip ../SpiritValeMarket.zip . && cd ..
 
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}
-          name: v${{ github.run_number }}
-          files: extract/frida/SpiritValeMarket.exe
+          tag_name: v${{ steps.version.outputs.v }}
+          name: v${{ steps.version.outputs.v }}
+          files: |
+            extract/frida/SpiritValeMarket.exe
+            SpiritValeMarket.zip
