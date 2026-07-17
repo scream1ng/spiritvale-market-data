@@ -39,7 +39,11 @@ if errorlevel 1 (
 start "" "{sys.executable}"
 del "%~f0"
 """)
-        subprocess.Popen(["cmd", "/c", updater], creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP, close_fds=True)
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        try:
+            subprocess.Popen(["cmd", "/c", updater], creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB, close_fds=True)
+        except OSError:
+            subprocess.Popen(["cmd", "/c", updater], creationflags=flags, close_fds=True)
         print("Restarting to apply update...")
         os._exit(0)
     except Exception as e:
