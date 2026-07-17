@@ -1,6 +1,7 @@
 name: Build and release exe
 
 on:
+  workflow_dispatch: {}
   push:
     branches: [main]
     paths:
