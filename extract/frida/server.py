@@ -205,6 +205,10 @@ INDEX_HTML = """<!doctype html>
   .stat-tag:hover { background: #33334a; }
   .stat-tag.active { background: var(--accent); color: #fff; }
   #activeFilters:not(:empty) { margin-bottom: 14px; }
+  .suggestions { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; background: #262630; border: 1px solid var(--border); border-radius: 6px; max-height: 200px; overflow-y: auto; z-index: 10; }
+  .suggestions.hidden { display: none; }
+  .suggestion-item { padding: 8px 12px; font-size: 13px; cursor: pointer; }
+  .suggestion-item:hover, .suggestion-item.active { background: #33334a; }
   .seller { color: var(--muted); }
   .item-cell { display: flex; align-items: center; gap: 10px; }
   .item-icon { width: 32px; height: 32px; border-radius: 6px; background: #262630; object-fit: contain; flex-shrink: 0; }
@@ -232,8 +236,15 @@ INDEX_HTML = """<!doctype html>
       <div class="stats" id="priceStats"></div>
     </div>
     <div class="controls">
-      <input type="text" id="itemInput" placeholder="item name">
+      <input type="text" id="itemInput" placeholder="item name" onkeydown="if(event.key==='Enter')checkPrice(this.value)">
       <button onclick="checkPrice(document.getElementById('itemInput').value)">Check Price</button>
+    </div>
+    <div class="controls" style="position:relative;">
+      <input type="text" id="filterInput" placeholder="filter by substat name, press enter"
+        oninput="renderFilterSuggestions(this.value)"
+        onkeydown="handleFilterKeydown(event)"
+        onblur="setTimeout(hideFilterSuggestions, 150)">
+      <div id="filterSuggestions" class="suggestions hidden"></div>
     </div>
     <div id="activeFilters"></div>
     <div id="priceBox"><div class="empty">Search an item to see live listings.</div></div>
@@ -287,6 +298,80 @@ async function loadStatTypes() {
   for (const [id, name] of pairs) statTypeNames[id] = name;
 }
 loadStatTypes();
+
+function addFilterByName(name) {
+  name = name.trim().toLowerCase();
+  if (!name) return;
+  const entries = Object.entries(statTypeNames);
+  const match = entries.find(([id, n]) => n.toLowerCase() === name)
+    || entries.find(([id, n]) => n.toLowerCase().includes(name));
+  if (!match) return;
+  addFilterById(match[0]);
+}
+
+function addFilterById(id) {
+  activeFilters.add(Number(id));
+  renderActiveFilters();
+  renderListings();
+  renderInventory();
+}
+
+let filterSuggestions = [];
+let filterSuggestionIndex = -1;
+
+function hideFilterSuggestions() {
+  const box = document.getElementById('filterSuggestions');
+  box.classList.add('hidden');
+  box.innerHTML = '';
+  filterSuggestions = [];
+  filterSuggestionIndex = -1;
+}
+
+function renderFilterSuggestions(value) {
+  const box = document.getElementById('filterSuggestions');
+  const q = value.trim().toLowerCase();
+  if (!q) { hideFilterSuggestions(); return; }
+  filterSuggestions = Object.entries(statTypeNames)
+    .filter(([id, name]) => name.toLowerCase().includes(q))
+    .sort((a, b) => a[1].localeCompare(b[1]))
+    .slice(0, 8);
+  filterSuggestionIndex = -1;
+  if (!filterSuggestions.length) { hideFilterSuggestions(); return; }
+  box.innerHTML = filterSuggestions.map(([id, name]) =>
+    `<div class="suggestion-item" onmousedown="selectFilterSuggestion(${id})">${name}</div>`
+  ).join('');
+  box.classList.remove('hidden');
+}
+
+function moveFilterSuggestion(delta) {
+  if (!filterSuggestions.length) return;
+  filterSuggestionIndex = (filterSuggestionIndex + delta + filterSuggestions.length) % filterSuggestions.length;
+  const box = document.getElementById('filterSuggestions');
+  [...box.children].forEach((el, i) => el.classList.toggle('active', i === filterSuggestionIndex));
+}
+
+function selectFilterSuggestion(id) {
+  addFilterById(id);
+  const input = document.getElementById('filterInput');
+  input.value = '';
+  hideFilterSuggestions();
+}
+
+function handleFilterKeydown(event) {
+  if (event.key === 'ArrowDown') { event.preventDefault(); moveFilterSuggestion(1); }
+  else if (event.key === 'ArrowUp') { event.preventDefault(); moveFilterSuggestion(-1); }
+  else if (event.key === 'Enter') {
+    if (filterSuggestionIndex >= 0 && filterSuggestions[filterSuggestionIndex]) {
+      selectFilterSuggestion(filterSuggestions[filterSuggestionIndex][0]);
+    } else {
+      addFilterByName(event.target.value);
+      event.target.value = '';
+      hideFilterSuggestions();
+    }
+  } else if (event.key === 'Escape') {
+    hideFilterSuggestions();
+  }
+}
 
 function toggleFilter(type) {
   type = Number(type);
@@ -343,23 +428,52 @@ function itemTab(it) {
   return CLS_TO_TAB[it.cls] || 'Material';
 }
 
-// Recommend the lowest price among listings that rolled the same primary
-// attribute (Str/Dex/Agi/Int/Vit/Luk) as the item in hand - that's the going
-// floor for "an item like this one." Falls back to the lowest price overall
-// when the item has no primary attribute or nothing else shares it.
+// Recommend a price by trying every substat-combination that includes the
+// item's primary attribute (Str/Dex/Agi/Int/Vit/Luk) plus at least one other
+// substat, e.g. primary 1 with substats 2,3: {1,2} {1,3} {1,2,3} - never
+// {2,3}, since a combo without the primary attribute isn't representative.
+// Each combo's floor (lowest matching listing price) is taken, then
+// whichever combo has the highest floor wins - that's the most specific
+// combo the market still has data for, since rarer/more specific combos
+// price higher. Falls back to primary-attribute-only matching, then to the
+// lowest price overall, when the item has no primary attribute or no combo
+// matches.
 const PRIMARY_ATTRS = new Set(['Str', 'Dex', 'Agi', 'Int', 'Vit', 'Luk']);
 
 const invListingsCache = {}; // displayName -> listings[] | null | 'pending'
-const invPriceCache = {};    // "name|primaryAttr" -> {price, mode} | null | 'pending'
+const invPriceCache = {};    // "name|substatTypes" -> {price, mode} | null | 'pending'
 let invFetchToken = 0;
 
-function primaryAttr(it) {
+function primaryAttrType(it) {
   const s = (it.substats || []).find(s => PRIMARY_ATTRS.has(s.typeName));
-  return s ? s.typeName : null;
+  return s ? s.type : null;
+}
+
+function substatTypes(it) {
+  return [...new Set((it.substats || []).map(s => s.type))];
+}
+
+function combosWithPrimary(types, primaryType) {
+  const rest = types.filter(t => t !== primaryType);
+  const combos = [];
+  for (let mask = 0; mask < (1 << rest.length); mask++) {
+    const combo = [primaryType, ...rest.filter((_, i) => mask & (1 << i))];
+    if (combo.length >= 2) combos.push(combo);
+  }
+  return combos;
+}
+
+// A listing only counts as a comp for a given substat if its roll is no
+// better than the item in hand's roll - a listing with a higher roll on
+// that substat commands a premium the item in hand can't claim.
+function substatValueOk(listingSub, itemSub) {
+  if (!itemSub || itemSub.value === undefined || listingSub.value === undefined) return true;
+  return listingSub.value <= itemSub.value;
 }
 
 function priceKey(it) {
-  return it.displayName + '|' + (primaryAttr(it) || 'none');
+  const types = substatTypes(it).sort((a, b) => a - b).join(',');
+  return it.displayName + '|' + (types || 'none');
 }
 
 function priceCellHTML(key) {
@@ -367,10 +481,13 @@ function priceCellHTML(key) {
   if (cached === undefined) return '<span class="stat-label">&mdash;</span>';
   if (cached === 'pending') return '<span class="stat-label">loading&hellip;</span>';
   if (cached === null) return '<span class="stat-label">no listings</span>';
-  const prefix = cached.mode === 'attr' ? '' : '≈';
-  const title = cached.mode === 'attr' ? 'lowest price among listings with the same primary attribute'
-    : 'no matching primary attribute found: lowest price across all listings';
-  return `<span class="price" title="${title}">${prefix}${cached.price.toLocaleString()}g</span>`;
+  const prefix = cached.mode === 'all' ? '≈' : '';
+  const titles = {
+    combo: 'lowest price among listings sharing the substat combination that reached the highest price',
+    attr: 'lowest price among listings with the same primary attribute',
+    all: 'no matching substat combination found: lowest price across all listings',
+  };
+  return `<span class="price" title="${titles[cached.mode]}">${prefix}${cached.price.toLocaleString()}g</span>`;
 }
 
 function recomputeItemPrice(it) {
@@ -380,10 +497,26 @@ function recomputeItemPrice(it) {
   if (listings === 'pending') { invPriceCache[key] = 'pending'; }
   else if (listings === null || !listings.length) { invPriceCache[key] = null; }
   else {
-    const attr = primaryAttr(it);
-    const matched = attr ? listings.filter(l => (l.substats || []).some(s => s.typeName === attr)) : [];
-    const pool = matched.length ? matched : listings;
-    invPriceCache[key] = { price: Math.min(...pool.map(l => l.price)), mode: matched.length ? 'attr' : 'all' };
+    const substatByType = new Map((it.substats || []).map(s => [s.type, s]));
+    let bestFloor = null;
+    const primaryType = primaryAttrType(it);
+    if (primaryType !== null) {
+      for (const combo of combosWithPrimary(substatTypes(it), primaryType)) {
+        const matched = listings.filter(l => combo.every(t =>
+          (l.substats || []).some(s => s.type === t && substatValueOk(s, substatByType.get(t)))));
+        if (!matched.length) continue;
+        const floor = Math.min(...matched.map(l => l.price));
+        if (bestFloor === null || floor > bestFloor) bestFloor = floor;
+      }
+    }
+    if (bestFloor !== null) {
+      invPriceCache[key] = { price: bestFloor, mode: 'combo' };
+    } else {
+      const matched = primaryType !== null ? listings.filter(l =>
+        (l.substats || []).some(s => s.type === primaryType && substatValueOk(s, substatByType.get(primaryType)))) : [];
+      const pool = matched.length ? matched : listings;
+      invPriceCache[key] = { price: Math.min(...pool.map(l => l.price)), mode: matched.length ? 'attr' : 'all' };
+    }
   }
   document.querySelectorAll(`[data-price-key="${CSS.escape(key)}"]`).forEach(td => td.innerHTML = priceCellHTML(key));
 }
