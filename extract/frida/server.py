@@ -56,7 +56,7 @@ BUNDLE_DIR = getattr(sys, "_MEIPASS", HERE)
 DATA_DIR = os.path.join(HERE, "data") if os.path.isdir(os.path.join(HERE, "data")) else os.path.join(HERE, "..", "..", "data")
 ICON_DIR = os.path.join(DATA_DIR, "icons")
 STAT_TYPES = json.load(open(os.path.join(DATA_DIR, "stat_types.json"), encoding="utf-8"))
-PERCENT_STAT_TYPES = {47, 48, 52, 57, 58, 63, 64, 68, 69, 70, 71, 72, 73, 74, 75, 76, 80, 90, 98, 102, 121}
+PERCENT_STAT_TYPES = {48, 52, 57, 58, 63, 64, 68, 69, 70, 71, 72, 73, 74, 75, 76, 80, 90, 98, 102, 121}
 ITEMS = json.load(open(os.path.join(DATA_DIR, "items.json"), encoding="utf-8"))
 ID_TO_NAME = {i["id"]: i["name"] for i in ITEMS if i.get("id") and i.get("name")}
 ICON_FILES = set(os.listdir(ICON_DIR)) if os.path.isdir(ICON_DIR) else set()
