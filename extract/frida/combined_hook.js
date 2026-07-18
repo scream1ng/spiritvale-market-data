@@ -4001,6 +4001,12 @@ Il2Cpp.perform(() => {
                     const row = { cls: item.class.name, baseItemId: s(item.method("get_Id").invoke()), count: 1, substats: [] };
                     try { row.count = item.method("get_Count").invoke(); } catch (e) {}
                     try { row.refine = item.method("get_Refine").invoke(); } catch (e) {}
+                    if (row.cls === "ArtifactData") {
+                        try {
+                            const slotValue = item.method("get_Slot").invoke().field("value__").value;
+                            row.slot = ["Rune", "Jewel", "Scroll", "Relic"][slotValue] || null;
+                        } catch (e) {}
+                    }
                     try {
                         const isArtifact = row.cls === "ArtifactData";
                         if (row.cls === "EquipData" || isArtifact || row.cls === "GemData" || row.cls === "CosmeticData") {

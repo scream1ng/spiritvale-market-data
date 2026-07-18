@@ -116,7 +116,7 @@ def api_inventory():
     if not resp.get("ok"):
         return jsonify(resp), 500
     for it in resp["items"]:
-        it["displayName"] = display_name(it["baseItemId"])
+        it["displayName"] = it["slot"] if it.get("cls") == "ArtifactData" and it.get("slot") else display_name(it["baseItemId"])
         it["icon"] = icon_filename(it["baseItemId"])
         for st in it.get("substats", []):
             st["typeName"] = STAT_TYPES.get(str(st["type"]), "t" + str(st["type"]))
@@ -192,6 +192,8 @@ INDEX_HTML = """<!doctype html>
   button:hover { background: var(--accent2); }
   button:disabled { background: #3a3a44; cursor: default; }
   button.small { padding: 5px 12px; font-size: 12px; }
+  button.tab { background: #262630; color: var(--muted); }
+  button.tab.active { background: var(--accent); color: #fff; }
   input[type=text], select { background: #262630; border: 1px solid var(--border); color: var(--text); padding: 8px 12px; border-radius: 6px; font-size: 13px; }
   input[type=text] { flex: 1; min-width: 180px; }
   table { border-collapse: collapse; width: 100%; }
@@ -250,7 +252,14 @@ INDEX_HTML = """<!doctype html>
     <div class="controls">
       <button onclick="loadInventory()">Scan Inventory</button>
     </div>
-    <table id="invTable"><thead><tr><th>Item</th><th>Substats</th><th></th></tr></thead><tbody></tbody></table>
+    <div class="controls" id="invTabs">
+      <button class="small tab active" data-tab="Equipment" onclick="setInvTab('Equipment')">Equipment</button>
+      <button class="small tab" data-tab="Cards" onclick="setInvTab('Cards')">Cards</button>
+      <button class="small tab" data-tab="Artifacts" onclick="setInvTab('Artifacts')">Artifacts</button>
+      <button class="small tab" data-tab="Gems" onclick="setInvTab('Gems')">Gems</button>
+      <button class="small tab" data-tab="Material" onclick="setInvTab('Material')">Material</button>
+    </div>
+    <table id="invTable"><thead><tr><th>Item</th><th>Substats</th><th>Rec. Price</th><th></th></tr></thead><tbody></tbody></table>
     <div class="pager">
       <span id="invPageInfo" class="stat-label"></span>
       <button class="small" id="invPrev" onclick="invPage--; renderInventory()">&laquo; Prev</button>
@@ -297,7 +306,25 @@ function renderActiveFilters() {
 
 let lastInventory = [];
 let invPage = 0;
+let invTab = 'Equipment';
 const INV_PAGE_SIZE = 10;
+
+const CLS_TO_TAB = {
+  EquipData: 'Equipment',
+  ArtifactData: 'Artifacts',
+  CardData: 'Cards',
+  GemData: 'Gems',
+  JunkData: 'Material',
+  ConsumableData: 'Material',
+  CosmeticData: 'Material',
+};
+
+function setInvTab(tab) {
+  invTab = tab;
+  invPage = 0;
+  document.querySelectorAll('#invTabs .tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  renderInventory();
+}
 
 async function loadInventory() {
   const res = await fetch('/api/inventory');
@@ -311,15 +338,89 @@ async function loadInventory() {
   renderInventory();
 }
 
+function itemTab(it) {
+  if (it.displayName && it.displayName.includes('Card')) return 'Cards';
+  return CLS_TO_TAB[it.cls] || 'Material';
+}
+
+// Recommend the lowest price among listings that rolled the same primary
+// attribute (Str/Dex/Agi/Int/Vit/Luk) as the item in hand - that's the going
+// floor for "an item like this one." Falls back to the lowest price overall
+// when the item has no primary attribute or nothing else shares it.
+const PRIMARY_ATTRS = new Set(['Str', 'Dex', 'Agi', 'Int', 'Vit', 'Luk']);
+
+const invListingsCache = {}; // displayName -> listings[] | null | 'pending'
+const invPriceCache = {};    // "name|primaryAttr" -> {price, mode} | null | 'pending'
+let invFetchToken = 0;
+
+function primaryAttr(it) {
+  const s = (it.substats || []).find(s => PRIMARY_ATTRS.has(s.typeName));
+  return s ? s.typeName : null;
+}
+
+function priceKey(it) {
+  return it.displayName + '|' + (primaryAttr(it) || 'none');
+}
+
+function priceCellHTML(key) {
+  const cached = invPriceCache[key];
+  if (cached === undefined) return '<span class="stat-label">&mdash;</span>';
+  if (cached === 'pending') return '<span class="stat-label">loading&hellip;</span>';
+  if (cached === null) return '<span class="stat-label">no listings</span>';
+  const prefix = cached.mode === 'attr' ? '' : '≈';
+  const title = cached.mode === 'attr' ? 'lowest price among listings with the same primary attribute'
+    : 'no matching primary attribute found: lowest price across all listings';
+  return `<span class="price" title="${title}">${prefix}${cached.price.toLocaleString()}g</span>`;
+}
+
+function recomputeItemPrice(it) {
+  const key = priceKey(it);
+  const listings = invListingsCache[it.displayName];
+  if (listings === undefined) return;
+  if (listings === 'pending') { invPriceCache[key] = 'pending'; }
+  else if (listings === null || !listings.length) { invPriceCache[key] = null; }
+  else {
+    const attr = primaryAttr(it);
+    const matched = attr ? listings.filter(l => (l.substats || []).some(s => s.typeName === attr)) : [];
+    const pool = matched.length ? matched : listings;
+    invPriceCache[key] = { price: Math.min(...pool.map(l => l.price)), mode: matched.length ? 'attr' : 'all' };
+  }
+  document.querySelectorAll(`[data-price-key="${CSS.escape(key)}"]`).forEach(td => td.innerHTML = priceCellHTML(key));
+}
+
+async function fetchInvPrices(pageItems) {
+  const token = ++invFetchToken;
+  const names = [...new Set(pageItems.map(it => it.displayName))].filter(n => !(n in invListingsCache));
+  for (const name of names) {
+    if (token !== invFetchToken) return;
+    invListingsCache[name] = 'pending';
+    pageItems.filter(it => it.displayName === name).forEach(recomputeItemPrice);
+    let listings = null;
+    try {
+      const res = await fetch('/api/price?item=' + encodeURIComponent(name));
+      const data = await res.json();
+      if (!data.error) listings = data.listings || [];
+    } catch (e) {}
+    if (token !== invFetchToken) return;
+    invListingsCache[name] = listings;
+    pageItems.filter(it => it.displayName === name).forEach(recomputeItemPrice);
+  }
+}
+
 function renderInventory() {
   const tbody = document.querySelector('#invTable tbody');
   tbody.innerHTML = '';
-  document.getElementById('invCount').textContent = lastInventory.length;
 
-  const pageCount = Math.max(1, Math.ceil(lastInventory.length / INV_PAGE_SIZE));
+  const filtered = lastInventory
+    .filter(it => itemTab(it) === invTab)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+
+  document.getElementById('invCount').textContent = filtered.length;
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / INV_PAGE_SIZE));
   invPage = Math.max(0, Math.min(invPage, pageCount - 1));
   const start = invPage * INV_PAGE_SIZE;
-  const pageItems = lastInventory.slice(start, start + INV_PAGE_SIZE);
+  const pageItems = filtered.slice(start, start + INV_PAGE_SIZE);
 
   for (const it of pageItems) {
     const tr = document.createElement('tr');
@@ -329,17 +430,21 @@ function renderInventory() {
       return `<span class="stat-tag${hl}" onclick="toggleFilter(${s.type})">${s.typeName} ${val}</span>`;
     }).join('');
     const refinePrefix = it.refine ? `+${it.refine} ` : '';
+    const pKey = priceKey(it);
     tr.innerHTML = `<td><div class="item-cell">${iconImg(it)}<span>${refinePrefix}${it.displayName}</span></div></td>
       <td>${substr}</td>
+      <td data-price-key="${pKey.replace(/"/g, '&quot;')}">${priceCellHTML(pKey)}</td>
       <td><button class="small" onclick="checkPrice('${it.displayName.replace(/'/g, "\\\\'")}')">Check Price</button></td>`;
     tbody.appendChild(tr);
   }
 
-  const shownTo = lastInventory.length === 0 ? 0 : start + pageItems.length;
+  const shownTo = filtered.length === 0 ? 0 : start + pageItems.length;
   document.getElementById('invPageInfo').textContent =
-    lastInventory.length === 0 ? '' : `Showing ${start + 1}-${shownTo} of ${lastInventory.length}`;
+    filtered.length === 0 ? '' : `Showing ${start + 1}-${shownTo} of ${filtered.length}`;
   document.getElementById('invPrev').disabled = invPage === 0;
   document.getElementById('invNext').disabled = invPage >= pageCount - 1;
+
+  fetchInvPrices(pageItems);
 }
 
 async function checkPrice(item) {
