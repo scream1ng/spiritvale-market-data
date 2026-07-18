@@ -56,6 +56,7 @@ BUNDLE_DIR = getattr(sys, "_MEIPASS", HERE)
 DATA_DIR = os.path.join(HERE, "data") if os.path.isdir(os.path.join(HERE, "data")) else os.path.join(HERE, "..", "..", "data")
 ICON_DIR = os.path.join(DATA_DIR, "icons")
 STAT_TYPES = json.load(open(os.path.join(DATA_DIR, "stat_types.json"), encoding="utf-8"))
+PERCENT_STAT_TYPES = {47, 48, 52, 57, 58, 63, 64, 68, 69, 70, 71, 72, 73, 74, 75, 76, 80, 90, 98, 102, 121}
 ITEMS = json.load(open(os.path.join(DATA_DIR, "items.json"), encoding="utf-8"))
 ID_TO_NAME = {i["id"]: i["name"] for i in ITEMS if i.get("id") and i.get("name")}
 ICON_FILES = set(os.listdir(ICON_DIR)) if os.path.isdir(ICON_DIR) else set()
@@ -117,6 +118,9 @@ def api_inventory():
     for it in resp["items"]:
         it["displayName"] = display_name(it["baseItemId"])
         it["icon"] = icon_filename(it["baseItemId"])
+        for st in it.get("substats", []):
+            st["typeName"] = STAT_TYPES.get(str(st["type"]), "t" + str(st["type"]))
+            st["percent"] = st["type"] in PERCENT_STAT_TYPES
     return jsonify(resp)
 
 
@@ -155,6 +159,7 @@ def api_price():
         l["icon"] = icon_filename(key)
         for st in l.get("substats", []):
             st["typeName"] = STAT_TYPES.get(str(st["type"]), "t" + str(st["type"]))
+            st["percent"] = st["type"] in PERCENT_STAT_TYPES
 
     listings.sort(key=lambda l: l["price"])
     return jsonify({"query": query, "count": len(listings), "listings": listings})
@@ -196,6 +201,8 @@ INDEX_HTML = """<!doctype html>
   .price { color: var(--gold); font-weight: 700; }
   .stat-tag { display: inline-block; background: var(--tag); border-radius: 4px; padding: 2px 7px; margin: 1px 3px 1px 0; font-size: 11px; color: var(--tagtext); cursor: pointer; }
   .stat-tag:hover { background: #33334a; }
+  .stat-tag.active { background: var(--accent); color: #fff; }
+  #activeFilters:not(:empty) { margin-bottom: 14px; }
   .seller { color: var(--muted); }
   .item-cell { display: flex; align-items: center; gap: 10px; }
   .item-icon { width: 32px; height: 32px; border-radius: 6px; background: #262630; object-fit: contain; flex-shrink: 0; }
@@ -225,8 +232,8 @@ INDEX_HTML = """<!doctype html>
     <div class="controls">
       <input type="text" id="itemInput" placeholder="item name">
       <button onclick="checkPrice(document.getElementById('itemInput').value)">Check Price</button>
-      <select id="statFilter" onchange="renderListings()"><option value="">All substats</option></select>
     </div>
+    <div id="activeFilters"></div>
     <div id="priceBox"><div class="empty">Search an item to see live listings.</div></div>
   </div>
 
@@ -243,7 +250,7 @@ INDEX_HTML = """<!doctype html>
     <div class="controls">
       <button onclick="loadInventory()">Scan Inventory</button>
     </div>
-    <table id="invTable"><thead><tr><th>Item</th><th>Qty</th><th>Refine</th><th></th></tr></thead><tbody></tbody></table>
+    <table id="invTable"><thead><tr><th>Item</th><th>Substats</th><th></th></tr></thead><tbody></tbody></table>
     <div class="pager">
       <span id="invPageInfo" class="stat-label"></span>
       <button class="small" id="invPrev" onclick="invPage--; renderInventory()">&laquo; Prev</button>
@@ -262,18 +269,31 @@ function iconImg(it) {
     : `<div class="item-icon placeholder">?</div>`;
 }
 
+let statTypeNames = {};
+let activeFilters = new Set();
+
 async function loadStatTypes() {
   const res = await fetch('/api/stat-types');
   const pairs = await res.json();
-  const sel = document.getElementById('statFilter');
-  for (const [id, name] of pairs) {
-    const opt = document.createElement('option');
-    opt.value = id;
-    opt.textContent = name;
-    sel.appendChild(opt);
-  }
+  for (const [id, name] of pairs) statTypeNames[id] = name;
 }
 loadStatTypes();
+
+function toggleFilter(type) {
+  type = Number(type);
+  if (activeFilters.has(type)) activeFilters.delete(type);
+  else activeFilters.add(type);
+  renderActiveFilters();
+  renderListings();
+  renderInventory();
+}
+
+function renderActiveFilters() {
+  const box = document.getElementById('activeFilters');
+  box.innerHTML = [...activeFilters].map(t =>
+    `<span class="stat-tag active" onclick="toggleFilter(${t})">${statTypeNames[t] || ('t' + t)} &times;</span>`
+  ).join('');
+}
 
 let lastInventory = [];
 let invPage = 0;
@@ -303,8 +323,14 @@ function renderInventory() {
 
   for (const it of pageItems) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td><div class="item-cell">${iconImg(it)}<span>${it.displayName}</span></div></td>
-      <td>${it.count}</td><td>${it.refine || ''}</td>
+    const substr = (it.substats || []).map(s => {
+      const val = ((s.displayValue !== undefined && s.displayValue !== null) ? ('+' + s.displayValue) : (s.value + '/100')) + (s.percent ? '%' : '');
+      const hl = activeFilters.has(s.type) ? ' active' : '';
+      return `<span class="stat-tag${hl}" onclick="toggleFilter(${s.type})">${s.typeName} ${val}</span>`;
+    }).join('');
+    const refinePrefix = it.refine ? `+${it.refine} ` : '';
+    tr.innerHTML = `<td><div class="item-cell">${iconImg(it)}<span>${refinePrefix}${it.displayName}</span></div></td>
+      <td>${substr}</td>
       <td><button class="small" onclick="checkPrice('${it.displayName.replace(/'/g, "\\\\'")}')">Check Price</button></td>`;
     tbody.appendChild(tr);
   }
@@ -318,7 +344,6 @@ function renderInventory() {
 
 async function checkPrice(item) {
   document.getElementById('itemInput').value = item;
-  document.getElementById('statFilter').value = '';
   const box = document.getElementById('priceBox');
   box.innerHTML = '<div class="empty">searching...</div>';
   document.getElementById('priceStats').innerHTML = '';
@@ -329,18 +354,12 @@ async function checkPrice(item) {
   renderListings();
 }
 
-function filterByStat(type) {
-  document.getElementById('statFilter').value = String(type);
-  renderListings();
-}
-
 function renderListings() {
   const box = document.getElementById('priceBox');
   const statsBox = document.getElementById('priceStats');
-  const statFilter = document.getElementById('statFilter').value;
 
-  const listings = statFilter
-    ? lastListings.filter(l => (l.substats || []).some(s => String(s.type) === statFilter))
+  const listings = activeFilters.size
+    ? lastListings.filter(l => [...activeFilters].every(t => (l.substats || []).some(s => s.type === t)))
     : lastListings;
 
   if (listings.length === 0) {
@@ -359,9 +378,9 @@ function renderListings() {
   let html = '<table><thead><tr><th>Item</th><th>Price</th><th>Qty</th><th>Refine</th><th>Substats</th><th>Seller</th></tr></thead><tbody>';
   for (const l of listings) {
     const substr = (l.substats || []).map(s => {
-      const val = (s.displayValue !== undefined && s.displayValue !== null) ? ('+' + s.displayValue) : (s.value + '/100');
-      const hl = statFilter && String(s.type) === statFilter ? ' style="background:#3a5fd9;color:#fff"' : '';
-      return `<span class="stat-tag"${hl} onclick="filterByStat(${s.type})">${s.typeName} ${val}</span>`;
+      const val = ((s.displayValue !== undefined && s.displayValue !== null) ? ('+' + s.displayValue) : (s.value + '/100')) + (s.percent ? '%' : '');
+      const hl = activeFilters.has(s.type) ? ' active' : '';
+      return `<span class="stat-tag${hl}" onclick="toggleFilter(${s.type})">${s.typeName} ${val}</span>`;
     }).join('');
     html += `<tr><td><div class="item-cell">${iconImg(l)}<span>${l.displayName}</span></div></td>
       <td class="price">${l.price.toLocaleString()}g</td><td>${l.itemCount}</td><td>${l.refine || ''}</td>

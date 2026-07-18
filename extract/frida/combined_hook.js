@@ -3998,9 +3998,34 @@ Il2Cpp.perform(() => {
                 const out = [];
                 for (let i = 0; i < count; i++) {
                     const item = items.method("get_Item", 1).invoke(i);
-                    const row = { cls: item.class.name, baseItemId: s(item.method("get_Id").invoke()), count: 1 };
+                    const row = { cls: item.class.name, baseItemId: s(item.method("get_Id").invoke()), count: 1, substats: [] };
                     try { row.count = item.method("get_Count").invoke(); } catch (e) {}
                     try { row.refine = item.method("get_Refine").invoke(); } catch (e) {}
+                    try {
+                        const isArtifact = row.cls === "ArtifactData";
+                        if (row.cls === "EquipData" || isArtifact || row.cls === "GemData" || row.cls === "CosmeticData") {
+                            const substats = item.method("get_Substats").invoke();
+                            if (!substats.isNull()) {
+                                const sc = substats.method("get_Count").invoke();
+                                for (let j = 0; j < sc; j++) {
+                                    const stat = substats.method("get_Item", 1).invoke(j);
+                                    const type = stat.method("get_Type").invoke().field("value__").value;
+                                    const value = stat.method("get_Value").invoke();
+                                    const entry = { type, value };
+                                    try {
+                                        const computed = computeDisplayValue(row.baseItemId, type, value, isArtifact);
+                                        if (computed) {
+                                            entry.displayValue = computed.display;
+                                            entry.range = [computed.min, computed.max];
+                                        }
+                                    } catch (e3) { entry.computeError = e3.message; }
+                                    row.substats.push(entry);
+                                }
+                            }
+                        }
+                    } catch (e2) {
+                        row.substatError = e2.message;
+                    }
                     out.push(row);
                 }
                 return { ok: true, items: out };
