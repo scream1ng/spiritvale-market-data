@@ -70,6 +70,7 @@ STAT_TYPES = json.load(open(os.path.join(DATA_DIR, "stat_types.json"), encoding=
 PERCENT_STAT_TYPES = {48, 52, 57, 58, 63, 64, 68, 69, 70, 71, 72, 73, 74, 75, 76, 80, 90, 98, 102, 121}
 ITEMS = json.load(open(os.path.join(DATA_DIR, "items.json"), encoding="utf-8"))
 ID_TO_NAME = {i["id"]: i["name"] for i in ITEMS if i.get("id") and i.get("name")}
+NAME_TO_ID = {i["name"].lower(): i["id"] for i in ITEMS if i.get("id") and i.get("name")}
 ICON_FILES = set(os.listdir(ICON_DIR)) if os.path.isdir(ICON_DIR) else set()
 
 
@@ -154,6 +155,13 @@ def api_inventory():
     return jsonify(resp)
 
 
+@app.route("/api/icon")
+def api_icon():
+    name = request.args.get("name", "").strip().lower()
+    id_ = NAME_TO_ID.get(name)
+    return jsonify({"icon": icon_filename(id_) if id_ else None})
+
+
 @app.route("/api/price")
 def api_price():
     query = request.args.get("item", "").strip()
@@ -210,6 +218,12 @@ INDEX_HTML = """<!doctype html>
   .cards { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 24px; max-width: 1400px; margin: 0 auto; }
   .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; min-width: 0; }
   .card.wide { flex: 2 1 560px; }
+  @media (orientation: portrait) {
+    .cards { flex-direction: column; }
+    .card.wide, .card.narrow { flex: 1 1 auto; width: 100%; }
+    #priceBox { max-height: 50vh; overflow-y: auto; }
+    #priceBox table thead th { position: sticky; top: 0; background: var(--card); }
+  }
   .card.narrow { flex: 1 1 340px; }
   .card-head { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px; margin-bottom: 16px; }
   .card-title { font-size: 18px; font-weight: 700; margin: 0 0 4px 0; }
@@ -234,6 +248,9 @@ INDEX_HTML = """<!doctype html>
   .stat-tag { display: inline-block; background: var(--tag); border-radius: 4px; padding: 2px 7px; margin: 1px 3px 1px 0; font-size: 11px; color: var(--tagtext); cursor: pointer; }
   .stat-tag:hover { background: #33334a; }
   .stat-tag.active { background: var(--accent); color: #fff; }
+  .fav-star { background: #262630; color: var(--muted); font-size: 16px; padding: 6px 10px; line-height: 1; }
+  .fav-star.active { color: var(--gold); }
+  .fav-star:disabled { opacity: .35; cursor: default; }
   #activeFilters:not(:empty) { margin-bottom: 14px; }
   .filter-value { width: 22px; height: 20px; margin-left: 5px; border: none; border-radius: 3px; padding: 1px 3px; font-size: 11px; text-align: center; -moz-appearance: textfield; }
   .filter-value::-webkit-inner-spin-button, .filter-value::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
@@ -270,8 +287,9 @@ INDEX_HTML = """<!doctype html>
       <div class="stats" id="priceStats"></div>
     </div>
     <div class="controls">
-      <input type="text" id="itemInput" placeholder="item name" onkeydown="if(event.key==='Enter')checkPrice(this.value)">
+      <input type="text" id="itemInput" placeholder="item name" oninput="updateFavStar()" onkeydown="if(event.key==='Enter')checkPrice(this.value)">
       <button onclick="checkPrice(document.getElementById('itemInput').value)">Check Price</button>
+      <button class="small fav-star" id="favStar" title="Save to favorites" onclick="toggleFavorite(document.getElementById('itemInput').value)">&#9734;</button>
     </div>
     <div class="controls" style="position:relative;">
       <input type="text" id="filterInput" placeholder="filter by substat name, press enter"
@@ -285,16 +303,20 @@ INDEX_HTML = """<!doctype html>
   </div>
 
   <div class="card narrow">
+    <div class="controls" id="invModeTabs">
+      <button class="small tab active" data-mode="Inventory" onclick="setInvMode('Inventory')">Inventory</button>
+      <button class="small tab" data-mode="Favorites" onclick="setInvMode('Favorites')">Favorites</button>
+    </div>
     <div class="card-head">
       <div>
-        <p class="card-title">Inventory</p>
-        <p class="card-sub">Keep the game running with the vending search panel opened at least once.</p>
+        <p class="card-title" id="invCardTitle">Inventory</p>
+        <p class="card-sub" id="invCardSub">Keep the game running with the vending search panel opened at least once.</p>
       </div>
       <div class="stats">
         <div><div class="stat-label">Items</div><div class="stat-value" id="invCount">&mdash;</div></div>
       </div>
     </div>
-    <div class="controls">
+    <div class="controls" id="invScanControls">
       <button onclick="loadInventory()">Scan Inventory</button>
     </div>
     <div class="controls" id="invTabs">
@@ -470,9 +492,60 @@ function renderActiveFilters() {
   ).join('');
 }
 
+let favorites = JSON.parse(localStorage.getItem('svm_favorites') || '[]')
+  .map(f => typeof f === 'string' ? { name: f, filters: [] } : f)
+  .filter(f => f && f.name);
+
+let lastCheckedName = null;
+let lastCheckedOk = false;
+
+function saveFavorites() {
+  localStorage.setItem('svm_favorites', JSON.stringify(favorites));
+}
+
+function isFavorite(name) {
+  name = name.trim();
+  return favorites.some(f => f.name === name);
+}
+
+function canFavorite(name) {
+  name = (name || '').trim();
+  return !!name && name === (lastCheckedName || '') && lastCheckedOk;
+}
+
+function toggleFavorite(name) {
+  name = (name || '').trim();
+  if (!name) return;
+  const i = favorites.findIndex(f => f.name === name);
+  if (i < 0 && !canFavorite(name)) return;
+  if (i >= 0) favorites.splice(i, 1);
+  else favorites.push({ name, filters: [...activeFilters] });
+  saveFavorites();
+  updateFavStar();
+  renderInventory();
+}
+
+function updateFavStar() {
+  const name = document.getElementById('itemInput').value;
+  const btn = document.getElementById('favStar');
+  const fav = !!name.trim() && isFavorite(name);
+  const eligible = canFavorite(name);
+  btn.classList.toggle('active', fav);
+  btn.innerHTML = fav ? '&#9733;' : '&#9734;';
+  btn.disabled = !fav && !eligible;
+  btn.title = fav ? 'Remove from favorites' : (eligible ? 'Save to favorites' : 'Search this item first to favorite it');
+}
+
+function loadFavorite(idx) {
+  const f = favorites[idx];
+  if (!f) return;
+  checkPrice(f.name, f.filters);
+}
+
 let lastInventory = [];
 let invPage = 0;
 let invTab = 'Equipment';
+let invMode = 'Inventory';
 const INV_PAGE_SIZE = 10;
 
 const CLS_TO_TAB = {
@@ -489,6 +562,19 @@ function setInvTab(tab) {
   invTab = tab;
   invPage = 0;
   document.querySelectorAll('#invTabs .tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  renderInventory();
+}
+
+function setInvMode(mode) {
+  invMode = mode;
+  invPage = 0;
+  document.querySelectorAll('#invModeTabs .tab').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+  document.getElementById('invScanControls').style.display = mode === 'Inventory' ? 'flex' : 'none';
+  document.getElementById('invTabs').style.display = mode === 'Inventory' ? 'flex' : 'none';
+  document.getElementById('invCardTitle').textContent = mode;
+  document.getElementById('invCardSub').textContent = mode === 'Inventory'
+    ? 'Keep the game running with the vending search panel opened at least once.'
+    : 'Saved items for quick price checks.';
   renderInventory();
 }
 
@@ -621,13 +707,52 @@ async function fetchInvPrices(pageItems) {
   }
 }
 
+const favIconCache = {}; // favorite name -> icon filename | null
+
+function favIconHTML(name) {
+  const icon = favIconCache[name];
+  return icon
+    ? `<img class="item-icon" src="/icons/${encodeURIComponent(icon)}">`
+    : `<div class="item-icon placeholder">?</div>`;
+}
+
+async function fetchFavIcons(favItems) {
+  for (const f of favItems) {
+    if (f.name in favIconCache) continue;
+    let icon = null;
+    try {
+      const res = await fetch('/api/icon?name=' + encodeURIComponent(f.name));
+      const data = await res.json();
+      icon = data.icon || null;
+    } catch (e) {}
+    favIconCache[f.name] = icon;
+    document.querySelectorAll(`[data-fav-icon="${CSS.escape(f.name)}"]`).forEach(div => {
+      div.innerHTML = favIconHTML(f.name) + `<span>${f.name}</span>`;
+    });
+  }
+}
+
+function filterBadgesHTML(filters) {
+  if (!filters || !filters.length) return '<span class="stat-label">no filter</span>';
+  return filters.map(([t, f]) => {
+    const val = f.value != null ? (f.mode === 'eq' ? ' =' : ' ≥') + f.value : '';
+    return `<span class="stat-tag">${statTypeNames[t] || ('t' + t)}${val}</span>`;
+  }).join('');
+}
+
 function renderInventory() {
   const tbody = document.querySelector('#invTable tbody');
   tbody.innerHTML = '';
+  const isFav = invMode === 'Favorites';
+  document.querySelector('#invTable thead').innerHTML = isFav
+    ? '<tr><th>Item</th><th>Filter</th><th></th></tr>'
+    : '<tr><th>Item</th><th>Substats</th><th>Rec. Price</th><th></th></tr>';
 
-  const filtered = lastInventory
-    .filter(it => itemTab(it) === invTab)
-    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  const filtered = isFav
+    ? [...favorites].sort((a, b) => a.name.localeCompare(b.name))
+    : lastInventory
+      .filter(it => itemTab(it) === invTab)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
 
   document.getElementById('invCount').textContent = filtered.length;
 
@@ -636,20 +761,34 @@ function renderInventory() {
   const start = invPage * INV_PAGE_SIZE;
   const pageItems = filtered.slice(start, start + INV_PAGE_SIZE);
 
-  for (const it of pageItems) {
-    const tr = document.createElement('tr');
-    const substr = (it.substats || []).map(s => {
-      const val = ((s.displayValue !== undefined && s.displayValue !== null) ? ('+' + s.displayValue) : (s.value + '/100')) + (s.percent ? '%' : '');
-      const hl = activeFilters.has(s.type) ? ' active' : '';
-      return `<span class="stat-tag${hl}" onclick="toggleFilterWithValue(${s.type}, ${s.displayValue ?? s.value})">${s.typeName} ${val}</span>`;
-    }).join('');
-    const refinePrefix = it.refine ? `+${it.refine} ` : '';
-    const pKey = priceKey(it);
-    tr.innerHTML = `<td><div class="item-cell">${iconImg(it)}<span>${refinePrefix}${it.displayName}</span></div></td>
-      <td>${substr}</td>
-      <td data-price-key="${pKey.replace(/"/g, '&quot;')}">${priceCellHTML(pKey)}</td>
-      <td><button class="small" onclick="checkPrice('${it.displayName.replace(/'/g, "\\\\'")}')">Check Price</button></td>`;
-    tbody.appendChild(tr);
+  if (isFav) {
+    for (const f of pageItems) {
+      const tr = document.createElement('tr');
+      const idx = favorites.indexOf(f);
+      const esc = f.name.replace(/'/g, "\\'");
+      const attrEsc = f.name.replace(/"/g, '&quot;');
+      tr.innerHTML = `<td><div class="item-cell" data-fav-icon="${attrEsc}">${favIconHTML(f.name)}<span>${f.name}</span></div></td>
+        <td>${filterBadgesHTML(f.filters)}</td>
+        <td><button class="small" onclick="loadFavorite(${idx})">Check Price</button>
+        <span class="filter-remove" onclick="toggleFavorite('${esc}')">&times;</span></td>`;
+      tbody.appendChild(tr);
+    }
+  } else {
+    for (const it of pageItems) {
+      const tr = document.createElement('tr');
+      const substr = (it.substats || []).map(s => {
+        const val = ((s.displayValue !== undefined && s.displayValue !== null) ? ('+' + s.displayValue) : (s.value + '/100')) + (s.percent ? '%' : '');
+        const hl = activeFilters.has(s.type) ? ' active' : '';
+        return `<span class="stat-tag${hl}" onclick="toggleFilterWithValue(${s.type}, ${s.displayValue ?? s.value})">${s.typeName} ${val}</span>`;
+      }).join('');
+      const refinePrefix = it.refine ? `+${it.refine} ` : '';
+      const pKey = priceKey(it);
+      tr.innerHTML = `<td><div class="item-cell">${iconImg(it)}<span>${refinePrefix}${it.displayName}</span></div></td>
+        <td>${substr}</td>
+        <td data-price-key="${pKey.replace(/"/g, '&quot;')}">${priceCellHTML(pKey)}</td>
+        <td><button class="small" onclick="checkPrice('${it.displayName.replace(/'/g, "\\\\'")}')">Check Price</button></td>`;
+      tbody.appendChild(tr);
+    }
   }
 
   const shownTo = filtered.length === 0 ? 0 : start + pageItems.length;
@@ -658,12 +797,14 @@ function renderInventory() {
   document.getElementById('invPrev').disabled = invPage === 0;
   document.getElementById('invNext').disabled = invPage >= pageCount - 1;
 
-  fetchInvPrices(pageItems);
+  if (isFav) fetchFavIcons(pageItems);
+  else fetchInvPrices(pageItems);
 }
 
-async function checkPrice(item) {
+async function checkPrice(item, filters) {
   document.getElementById('itemInput').value = item;
-  activeFilters.clear();
+  updateFavStar();
+  activeFilters = new Map(filters || []);
   renderActiveFilters();
   renderInventory();
   const box = document.getElementById('priceBox');
@@ -671,8 +812,17 @@ async function checkPrice(item) {
   document.getElementById('priceStats').innerHTML = '';
   const res = await fetch('/api/price?item=' + encodeURIComponent(item));
   const data = await res.json();
-  if (data.error) { box.innerHTML = '<div class="empty">Error: ' + JSON.stringify(data.error) + '</div>'; return; }
+  if (data.error) {
+    box.innerHTML = '<div class="empty">Error: ' + JSON.stringify(data.error) + '</div>';
+    lastCheckedName = null;
+    lastCheckedOk = false;
+    updateFavStar();
+    return;
+  }
   lastListings = data.listings || [];
+  lastCheckedName = item.trim();
+  lastCheckedOk = true;
+  updateFavStar();
   renderListings();
 }
 
@@ -715,6 +865,8 @@ function renderListings() {
   html += '</tbody></table>';
   box.innerHTML = html;
 }
+
+updateFavStar();
 </script>
 </body>
 </html>
