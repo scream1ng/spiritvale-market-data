@@ -3882,24 +3882,46 @@ Il2Cpp.perform(() => {
         return runtime;
     }
 
-    // displayed value = round(min + (max-min) * raw/100), derived from the game's own
-    // Formula.GetSubstatRange. Formula.GetSubstatScaledValue was previously used for the
-    // raw->fraction step, but instrumenting it live showed it only spans ~0.667-1.0 over
-    // raw 0-100 (not 0-1), which silently biased every display toward the top of its range
-    // regardless of the actual roll. raw/100 is the game's own convention for substat rolls
-    // (see the "value/100" fallback display elsewhere in this project). Confirmed round (not
-    // floor) against a live Stormburst Crossbow listing: Str raw=96, range[2,3], true display 3
-    // - floor(2.96)=2 is wrong, round(2.96)=3 is right.
-    function computeDisplayValue(baseItemId, statType, rawValue, isArtifact) {
+    // range (min~max) still comes from Formula.GetSubstatRange - confirmed correct.
+    function computeRange(baseItemId, statType, isArtifact) {
         const runtime = getSubstatRuntime(baseItemId, isArtifact);
         if (!runtime || runtime.isNull()) return null;
         const minRef = Il2Cpp.reference(0, int32Type);
         const maxRef = Il2Cpp.reference(0, int32Type);
         const ok = getSubstatRangeMethod.invoke(statType, runtime, minRef, maxRef);
         if (!ok) return null;
-        const min = minRef.value, max = maxRef.value;
-        const display = Math.round(min + (max - min) * (rawValue / 100));
-        return { min, max, display };
+        return { min: minRef.value, max: maxRef.value };
+    }
+
+    // Reimplementing the raw->display formula (round(min + (max-min) * raw/100)) gave wrong
+    // results some of the time - e.g. a live Archer's Beads with Hit raw=17 range[7,10]
+    // computed to 8 but the game's own tooltip showed 7, and AtkMult raw=33 range[1,2]
+    // computed to 1 but the tooltip showed 2. Formula.GetSubstats(EquipData/ArtifactData) is
+    // the method the game itself calls to resolve display values, so call it directly instead
+    // of guessing the curve.
+    const getSubstatsMethods = formulaCls.methods.filter(m => m.name === "GetSubstats" && m.parameters.length === 1);
+    const getSubstatsEquip = getSubstatsMethods.find(m => m.parameters[0].type.name === "EquipData");
+    const getSubstatsArtifact = getSubstatsMethods.find(m => m.parameters[0].type.name === "ArtifactData");
+    function getDisplayValues(equip, clsName) {
+        // Formula.GetSubstats is strictly typed (EquipData or ArtifactData param) and GemData/
+        // CosmeticData are sibling classes, not subclasses of EquipData - calling the EquipData
+        // overload on one is a type-mismatched native call on a live item instance, unlike the
+        // config-keyed calls elsewhere in this file. Only call it for the two types it accepts.
+        if (clsName !== "EquipData" && clsName !== "ArtifactData") return null;
+        try {
+            const overload = clsName === "ArtifactData" ? getSubstatsArtifact : getSubstatsEquip;
+            const result = overload.invoke(equip);
+            const rc = result.method("get_Count").invoke();
+            const map = new Map();
+            for (let k = 0; k < rc; k++) {
+                const sv = result.method("get_Item", 1).invoke(k);
+                const type = sv.field("Type").value.field("value__").value;
+                if (!map.has(type)) map.set(type, sv.field("Value").value.field("Value").value);
+            }
+            return map;
+        } catch (e) {
+            return null;
+        }
     }
 
     Interceptor.attach(method.virtualAddress, {
@@ -3935,6 +3957,7 @@ Il2Cpp.perform(() => {
                         if (!equip.isNull() && (clsName === "EquipData" || isArtifact || clsName === "GemData" || clsName === "CosmeticData")) {
                             try { row.refine = equip.method("get_Refine").invoke(); } catch (e4) {}
                             const substats = equip.method("get_Substats").invoke();
+                            const displayValues = getDisplayValues(equip, clsName);
                             if (!substats.isNull()) {
                                 const sc = substats.method("get_Count").invoke();
                                 for (let j = 0; j < sc; j++) {
@@ -3943,11 +3966,9 @@ Il2Cpp.perform(() => {
                                     const value = stat.method("get_Value").invoke();
                                     const entry = { type, value };
                                     try {
-                                        const computed = computeDisplayValue(row.baseItemId, type, value, isArtifact);
-                                        if (computed) {
-                                            entry.displayValue = computed.display;
-                                            entry.range = [computed.min, computed.max];
-                                        }
+                                        if (displayValues && displayValues.has(type)) entry.displayValue = displayValues.get(type);
+                                        const range = computeRange(row.baseItemId, type, isArtifact);
+                                        if (range) entry.range = [range.min, range.max];
                                     } catch (e3) { entry.computeError = e3.message; }
                                     row.substats.push(entry);
                                 }
@@ -4011,6 +4032,7 @@ Il2Cpp.perform(() => {
                         const isArtifact = row.cls === "ArtifactData";
                         if (row.cls === "EquipData" || isArtifact || row.cls === "GemData" || row.cls === "CosmeticData") {
                             const substats = item.method("get_Substats").invoke();
+                            const displayValues = getDisplayValues(item, row.cls);
                             if (!substats.isNull()) {
                                 const sc = substats.method("get_Count").invoke();
                                 for (let j = 0; j < sc; j++) {
@@ -4019,11 +4041,9 @@ Il2Cpp.perform(() => {
                                     const value = stat.method("get_Value").invoke();
                                     const entry = { type, value };
                                     try {
-                                        const computed = computeDisplayValue(row.baseItemId, type, value, isArtifact);
-                                        if (computed) {
-                                            entry.displayValue = computed.display;
-                                            entry.range = [computed.min, computed.max];
-                                        }
+                                        if (displayValues && displayValues.has(type)) entry.displayValue = displayValues.get(type);
+                                        const range = computeRange(row.baseItemId, type, isArtifact);
+                                        if (range) entry.range = [range.min, range.max];
                                     } catch (e3) { entry.computeError = e3.message; }
                                     row.substats.push(entry);
                                 }

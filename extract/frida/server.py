@@ -1,5 +1,7 @@
-import frida, json, time, os, re, sys, subprocess, tempfile, threading, urllib.request
+import frida, json, time, os, re, sys, subprocess, tempfile, threading, urllib.request, webbrowser, logging
 from flask import Flask, jsonify, request, send_from_directory
+
+sys.stdout.reconfigure(line_buffering=True)
 
 try:
     from _version import VERSION
@@ -30,16 +32,25 @@ def check_for_update():
         updater = os.path.join(tempfile.gettempdir(), "svm_update.bat")
         with open(updater, "w") as f:
             f.write(f"""@echo off
+set count=0
 :wait
 move /y "{new_path}" "{sys.executable}" >nul 2>&1
-if errorlevel 1 (
-  timeout /t 1 /nobreak >nul
-  goto wait
-)
+if not errorlevel 1 goto launch
+set /a count+=1
+if %count% geq 30 goto failed
+timeout /t 1 /nobreak >nul
+goto wait
+:launch
 start "" "{sys.executable}"
 del "%~f0"
+exit
+:failed
+echo Update failed: could not replace SpiritValeMarket.exe after 30 seconds.
+echo The file may be locked by another process. Try running SpiritValeMarket.exe manually.
+pause
+del "%~f0"
 """)
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        flags = subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
         try:
             subprocess.Popen(["cmd", "/c", updater], creationflags=flags | subprocess.CREATE_BREAKAWAY_FROM_JOB, close_fds=True)
         except OSError:
@@ -71,6 +82,9 @@ def icon_filename(id_):
 PROCESS_NAME = os.environ.get("SPIRITVALE_PROCESS", "SpiritVale.exe")
 
 app = Flask(__name__)
+logging.getLogger("werkzeug").setLevel(logging.ERROR)
+import flask.cli
+flask.cli.show_server_banner = lambda *args, **kwargs: None
 
 log_lines = []
 lock = threading.Lock()
@@ -82,17 +96,33 @@ def on_message(message, data):
             log_lines.append(message["payload"])
 
 
+def fatal_error(msg):
+    print()
+    print("=" * 60)
+    print("ERROR: " + msg)
+    print("=" * 60)
+    if getattr(sys, "frozen", False):
+        input("\nPress Enter to close this window...")
+    sys.exit(1)
+
+
 pid_override = os.environ.get("SPIRITVALE_PID")
 try:
     session = frida.attach(int(pid_override) if pid_override else PROCESS_NAME)
 except frida.ProcessNotFoundError:
-    raise SystemExit(
-        f"Could not find a running process named '{PROCESS_NAME}'. "
-        "Start SpiritVale first, or set SPIRITVALE_PID/SPIRITVALE_PROCESS if it's named differently."
+    fatal_error(
+        f"Could not find a running process named '{PROCESS_NAME}'.\n"
+        "Start SpiritVale first, then run this again."
     )
-script = session.create_script(open(os.path.join(BUNDLE_DIR, "combined_hook.js"), encoding="utf-8").read())
-script.on("message", on_message)
-script.load()
+except Exception as e:
+    fatal_error(f"Failed to attach to {PROCESS_NAME}: {e}")
+
+try:
+    script = session.create_script(open(os.path.join(BUNDLE_DIR, "combined_hook.js"), encoding="utf-8").read())
+    script.on("message", on_message)
+    script.load()
+except Exception as e:
+    fatal_error(f"Failed to load the game hook: {e}")
 
 
 def display_name(base_item_id):
@@ -205,6 +235,10 @@ INDEX_HTML = """<!doctype html>
   .stat-tag:hover { background: #33334a; }
   .stat-tag.active { background: var(--accent); color: #fff; }
   #activeFilters:not(:empty) { margin-bottom: 14px; }
+  .filter-value { width: 22px; height: 20px; margin-left: 5px; border: none; border-radius: 3px; padding: 1px 3px; font-size: 11px; text-align: center; -moz-appearance: textfield; }
+  .filter-value::-webkit-inner-spin-button, .filter-value::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+  .filter-step { margin-left: 4px; cursor: pointer; padding: 0 2px; font-weight: 700; user-select: none; }
+  .filter-remove { margin-left: 5px; cursor: pointer; }
   .suggestions { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; background: #262630; border: 1px solid var(--border); border-radius: 6px; max-height: 200px; overflow-y: auto; z-index: 10; }
   .suggestions.hidden { display: none; }
   .suggestion-item { padding: 8px 12px; font-size: 13px; cursor: pointer; }
@@ -290,7 +324,15 @@ function iconImg(it) {
 }
 
 let statTypeNames = {};
-let activeFilters = new Set();
+let activeFilters = new Map(); // type -> {mode: 'ge'|'eq', value: number|null}
+
+const PRIMARY_ATTR_NAMES = new Set(['Str', 'Dex', 'Agi', 'Int', 'Vit', 'Luk']);
+function clearOtherPrimaryFilters(type) {
+  if (!PRIMARY_ATTR_NAMES.has(statTypeNames[type])) return;
+  for (const t of [...activeFilters.keys()]) {
+    if (t !== type && PRIMARY_ATTR_NAMES.has(statTypeNames[t])) activeFilters.delete(t);
+  }
+}
 
 async function loadStatTypes() {
   const res = await fetch('/api/stat-types');
@@ -310,10 +352,18 @@ function addFilterByName(name) {
 }
 
 function addFilterById(id) {
-  activeFilters.add(Number(id));
+  id = Number(id);
+  clearOtherPrimaryFilters(id);
+  activeFilters.set(id, { mode: 'ge', value: null });
   renderActiveFilters();
   renderListings();
   renderInventory();
+}
+
+function setFilterValue(type, val) {
+  val = val.trim();
+  activeFilters.set(type, { mode: 'ge', value: val === '' ? null : Number(val) });
+  renderListings();
 }
 
 let filterSuggestions = [];
@@ -375,17 +425,48 @@ function handleFilterKeydown(event) {
 
 function toggleFilter(type) {
   type = Number(type);
-  if (activeFilters.has(type)) activeFilters.delete(type);
-  else activeFilters.add(type);
+  if (activeFilters.has(type)) {
+    activeFilters.delete(type);
+  } else {
+    clearOtherPrimaryFilters(type);
+    activeFilters.set(type, { mode: 'ge', value: null });
+  }
   renderActiveFilters();
   renderListings();
   renderInventory();
 }
 
+function toggleFilterWithValue(type, value) {
+  type = Number(type);
+  value = value === undefined || value === null ? null : Number(value);
+  const current = activeFilters.get(type);
+  if (current && current.mode === 'eq' && current.value === value) {
+    activeFilters.delete(type);
+  } else {
+    clearOtherPrimaryFilters(type);
+    activeFilters.set(type, { mode: 'eq', value });
+  }
+  renderActiveFilters();
+  renderListings();
+  renderInventory();
+}
+
+function stepFilterValue(type, delta) {
+  const current = activeFilters.get(type);
+  const floor = PRIMARY_ATTR_NAMES.has(statTypeNames[type]) ? 2 : 0;
+  const next = current && current.value !== null ? Math.max(floor, current.value + delta) : floor;
+  setFilterValue(type, String(next));
+  renderActiveFilters();
+}
+
 function renderActiveFilters() {
   const box = document.getElementById('activeFilters');
-  box.innerHTML = [...activeFilters].map(t =>
-    `<span class="stat-tag active" onclick="toggleFilter(${t})">${statTypeNames[t] || ('t' + t)} &times;</span>`
+  box.innerHTML = [...activeFilters].map(([t, f]) =>
+    `<span class="stat-tag active">${statTypeNames[t] || ('t' + t)}` +
+    `<span class="filter-step" onclick="stepFilterValue(${t}, -1)">&lsaquo;</span>` +
+    `<input type="number" class="filter-value" placeholder="≥" value="${f.value ?? ''}" onclick="event.stopPropagation()" oninput="setFilterValue(${t}, this.value)">` +
+    `<span class="filter-step" onclick="stepFilterValue(${t}, 1)">&rsaquo;</span>` +
+    `<span class="filter-remove" onclick="toggleFilter(${t})">&times;</span></span>`
   ).join('');
 }
 
@@ -560,7 +641,7 @@ function renderInventory() {
     const substr = (it.substats || []).map(s => {
       const val = ((s.displayValue !== undefined && s.displayValue !== null) ? ('+' + s.displayValue) : (s.value + '/100')) + (s.percent ? '%' : '');
       const hl = activeFilters.has(s.type) ? ' active' : '';
-      return `<span class="stat-tag${hl}" onclick="toggleFilter(${s.type})">${s.typeName} ${val}</span>`;
+      return `<span class="stat-tag${hl}" onclick="toggleFilterWithValue(${s.type}, ${s.displayValue ?? s.value})">${s.typeName} ${val}</span>`;
     }).join('');
     const refinePrefix = it.refine ? `+${it.refine} ` : '';
     const pKey = priceKey(it);
@@ -582,6 +663,9 @@ function renderInventory() {
 
 async function checkPrice(item) {
   document.getElementById('itemInput').value = item;
+  activeFilters.clear();
+  renderActiveFilters();
+  renderInventory();
   const box = document.getElementById('priceBox');
   box.innerHTML = '<div class="empty">searching...</div>';
   document.getElementById('priceStats').innerHTML = '';
@@ -597,7 +681,11 @@ function renderListings() {
   const statsBox = document.getElementById('priceStats');
 
   const listings = activeFilters.size
-    ? lastListings.filter(l => [...activeFilters].every(t => (l.substats || []).some(s => s.type === t)))
+    ? lastListings.filter(l => [...activeFilters].every(([t, f]) => (l.substats || []).some(s => {
+        if (s.type !== t || f.value === null) return s.type === t;
+        const val = s.displayValue ?? s.value;
+        return f.mode === 'eq' ? val === f.value : val >= f.value;
+      })))
     : lastListings;
 
   if (listings.length === 0) {
@@ -618,7 +706,7 @@ function renderListings() {
     const substr = (l.substats || []).map(s => {
       const val = ((s.displayValue !== undefined && s.displayValue !== null) ? ('+' + s.displayValue) : (s.value + '/100')) + (s.percent ? '%' : '');
       const hl = activeFilters.has(s.type) ? ' active' : '';
-      return `<span class="stat-tag${hl}" onclick="toggleFilter(${s.type})">${s.typeName} ${val}</span>`;
+      return `<span class="stat-tag${hl}" onclick="toggleFilterWithValue(${s.type}, ${s.displayValue ?? s.value})">${s.typeName} ${val}</span>`;
     }).join('');
     html += `<tr><td><div class="item-cell">${iconImg(l)}<span>${l.displayName}</span></div></td>
       <td class="price">${l.price.toLocaleString()}g</td><td>${l.itemCount}</td><td>${l.refine || ''}</td>
@@ -639,4 +727,15 @@ def index():
 
 
 if __name__ == "__main__":
-    app.run(port=5151, debug=False)
+    PORT = 5151
+    URL = f"http://127.0.0.1:{PORT}"
+    print()
+    print("=" * 60)
+    print(f"  SpiritVale Market Data  v{VERSION}")
+    print("=" * 60)
+    print(f"  Attached to: {PROCESS_NAME}")
+    print(f"  Web UI:      {URL}")
+    print("=" * 60)
+    print()
+    threading.Timer(1.0, lambda: webbrowser.open(URL)).start()
+    app.run(port=PORT, debug=False)
